@@ -6,3 +6,5 @@ tests/pkg/
 tests/wasm/
 test-results/
 playwright-report/
+worktrees/
+.direnv/
