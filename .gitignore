@@ -1,3 +1,8 @@
 target/
 *.log
 .DS_Store
+node_modules/
+tests/pkg/
+tests/wasm/
+test-results/
+playwright-report/

@@ -102,6 +102,7 @@
             pkgs.cargo-nextest
             pkgs.binaryen
             pkgs.wasm-bindgen-cli
+            pkgs.wasm-pack
             pkgs.pkg-config
             pkgs.llvmPackages_18.clang
             pkgs.llvmPackages_18.clang-unwrapped

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Page B - Receiver</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        #log { border: 1px solid #ccc; padding: 10px; margin-top: 10px; min-height: 200px; max-height: 400px; overflow-y: auto; }
+        .log-entry { margin: 2px 0; font-size: 11px; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>Page B - Receiver (Bob)</h1>
+    <div id="status">Initializing...</div>
+    <div id="log"></div>
+
+    <script type="module">
+        import initWasm, {
+            create_identity,
+            public_key,
+            create_key_package,
+            accept_welcome,
+            create_message,
+            ingest_wrapper,
+            self_update,
+            merge_pending_commit
+        } from './pkg/mdk_wasm.js';
+
+        const ORIGIN = 'bob';
+        const encoder = new TextEncoder();
+        const decoder = new TextDecoder();
+        const channel = new BroadcastChannel('mdk-test');
+        const logEl = document.getElementById('log');
+        const statusEl = document.getElementById('status');
+
+        const BOB_SECRET = '1111111111111111111111111111111111111111111111111111111111111111';
+
+        let bobId = null;
+        let bobPub = null;
+        let groupIdHex = null;
+
+        window.pageBReady = false;
+        window.receivedMessages = [];
+        window.receivedCommits = 0;
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[B] ${message}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function sendChannelMessage(payload) {
+            channel.postMessage({ from: ORIGIN, ...payload });
+        }
+
+        function decodeWrapper(eventJson) {
+            return encoder.encode(eventJson);
+        }
+
+        async function handleWelcome(welcomeJson) {
+            log('Processing welcome', 'info');
+            const result = accept_welcome(bobId, welcomeJson);
+            groupIdHex = result.group_id_hex;
+            log(`Joined group: ${groupIdHex.slice(0, 16)}…`, 'success');
+            statusEl.textContent = 'Ready';
+        }
+
+        function handleMessage(eventJson) {
+            if (!groupIdHex) {
+                log('Skipping message before welcome', 'info');
+                return;
+            }
+
+            const wrapperBytes = decodeWrapper(eventJson);
+            const processed = ingest_wrapper(bobId, wrapperBytes);
+
+            if (processed.kind === 'application' && processed.message) {
+                const { content, author } = processed.message;
+                log(`Decrypted message from ${author.slice(0, 16)}…: "${content}"`, 'success');
+                window.receivedMessages.push(content);
+            } else if (processed.kind === 'commit') {
+                window.receivedCommits += 1;
+                log('Processed commit wrapper', 'success');
+            } else {
+                log(`Unhandled wrapper kind: ${processed.kind}`, 'info');
+            }
+        }
+
+        function handleCommit(eventJson) {
+            if (!groupIdHex) {
+                log('Skipping commit before welcome', 'info');
+                return;
+            }
+
+            const wrapperBytes = decodeWrapper(eventJson);
+            const processed = ingest_wrapper(bobId, wrapperBytes);
+            if (processed.kind === 'commit') {
+                window.receivedCommits += 1;
+                log('Processed commit broadcast', 'success');
+                try {
+                    merge_pending_commit(bobId, groupIdHex);
+                } catch (err) {
+                    console.error('merge_pending_commit (bob) failed', err);
+                }
+            } else {
+                log(`Unexpected wrapper kind for commit: ${processed.kind}`, 'info');
+            }
+        }
+
+        channel.addEventListener('message', (event) => {
+            const data = event.data;
+            if (!data || data.from === ORIGIN) {
+                return;
+            }
+
+            switch (data.type) {
+                case 'welcome':
+                    handleWelcome(data.welcome);
+                    break;
+                case 'message':
+                    handleMessage(data.event);
+                    break;
+                case 'commit':
+                    handleCommit(data.event);
+                    break;
+                case 'alice_pubkey':
+                    log(`Alice pubkey: ${data.pubkey.slice(0, 16)}…`);
+                    break;
+                default:
+                    log(`Received unknown payload type: ${data.type}`, 'info');
+            }
+        });
+
+        async function main() {
+            try {
+                await initWasm();
+                log('WASM module loaded');
+
+                bobId = create_identity(BOB_SECRET);
+                bobPub = public_key(bobId);
+                log(`Bob identity created: ${bobPub.slice(0, 16)}…`);
+
+                const keyPackage = create_key_package(bobId, []);
+                log('Broadcasting key package to Alice');
+                sendChannelMessage({ type: 'key_package', event: keyPackage.event, pubkey: bobPub });
+
+                statusEl.textContent = 'Waiting for welcome…';
+                window.pageBReady = true;
+            } catch (err) {
+                log(`Initialization error: ${err}`, 'error');
+                statusEl.textContent = 'Error';
+                throw err;
+            }
+        }
+
+        window.sendMessage = async function (content) {
+            if (!groupIdHex) {
+                throw new Error('Group not established yet');
+            }
+
+            log(`Encrypting reply: "${content}"`);
+            const rumor = {
+                pubkey: bobPub,
+                created_at: Math.floor(Date.now() / 1000),
+                kind: 9,
+                tags: [],
+                content,
+            };
+
+            const payload = { group_id_hex: groupIdHex, rumor };
+            const wrapperBytes = create_message(bobId, payload);
+            const wrapperJson = decoder.decode(wrapperBytes);
+
+            sendChannelMessage({ type: 'message', event: wrapperJson });
+            log('Reply broadcast', 'success');
+            return JSON.parse(wrapperJson);
+        };
+
+        window.sendCommit = async function () {
+            if (!groupIdHex) {
+                throw new Error('Group not established yet');
+            }
+
+            log('Creating bob self-update commit');
+            const update = self_update(bobId, groupIdHex);
+            const commitJson = update.evolution_event;
+            sendChannelMessage({ type: 'commit', event: commitJson });
+            try {
+                merge_pending_commit(bobId, groupIdHex);
+            } catch (err) {
+                console.error('merge_pending_commit (bob) failed', err);
+            }
+            return JSON.parse(commitJson);
+        };
+
+        main();
+    </script>
+</body>
+</html>
