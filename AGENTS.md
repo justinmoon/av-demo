@@ -11,3 +11,5 @@ Our goal here is to build an e2ee video and audio calling app on top of Marmot (
 We have many related projects in ~/code/moq that you can look at for references or ideas. feel free to checkout more. If you need to fork dependencies, just make a branch in a checkout here and get it working with a local dep. Then push to a fork on justinmoon github get it working with a local dep. Then push to a fork on justinmoon github user using `gh`.
 
 Keep things simple. Try to keep directory structure reasonably flat.
+
+Never stub things out for a real implementation later unless you are explicitely told to do so. Your job is to make a real implementation now.
