@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Page A - Sender</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        #log { border: 1px solid #ccc; padding: 10px; margin-top: 10px; min-height: 200px; max-height: 400px; overflow-y: auto; }
+        .log-entry { margin: 2px 0; font-size: 11px; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>Page A - Sender (Alice)</h1>
+    <div id="status">Initializing...</div>
+    <div id="log"></div>
+
+    <script type="module">
+        import initWasm, {
+            create_identity,
+            public_key,
+            create_group,
+            create_message,
+            ingest_wrapper,
+            self_update,
+            merge_pending_commit
+        } from './pkg/mdk_wasm.js';
+
+        const ORIGIN = 'alice';
+        const encoder = new TextEncoder();
+        const decoder = new TextDecoder();
+        const channel = new BroadcastChannel('mdk-test');
+        const logEl = document.getElementById('log');
+        const statusEl = document.getElementById('status');
+
+        const ALICE_SECRET = '0000000000000000000000000000000000000000000000000000000000000001';
+
+        let aliceId = null;
+        let alicePub = null;
+        let groupIdHex = null;
+        let nostrGroupHex = null;
+        let bobPub = null;
+
+        window.pageAReady = false;
+        window.receivedMessages = [];
+        window.receivedCommits = 0;
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[A] ${message}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function sendChannelMessage(payload) {
+            channel.postMessage({ from: ORIGIN, ...payload });
+        }
+
+        function decodeWrapper(eventJson) {
+            const bytes = encoder.encode(eventJson);
+            return Uint8Array.from(bytes);
+        }
+
+        function encodeWrapper(bytes) {
+            return decoder.decode(bytes);
+        }
+
+        async function handleKeyPackage(data) {
+            if (groupIdHex) {
+                return; // already initialized
+            }
+
+            log('Received Bob key package', 'info');
+            bobPub = data.pubkey;
+
+            const config = {
+                name: 'MLS Demo Chat',
+                description: 'Phase 1 Step 2 conversation',
+                relays: [],
+                admins: [alicePub, bobPub],
+            };
+
+            try {
+                const result = create_group(aliceId, config, [data.event]);
+                groupIdHex = result.group_id_hex;
+                nostrGroupHex = result.nostr_group_id;
+
+                log(`Group created: ${groupIdHex.slice(0, 16)}…`, 'success');
+
+                if (result.welcome && result.welcome.length > 0) {
+                    log('Sending welcome to Bob');
+                    sendChannelMessage({ type: 'welcome', welcome: result.welcome[0] });
+                }
+
+                statusEl.textContent = 'Ready';
+                window.pageAReady = true;
+            } catch (err) {
+                log(`Group creation failed: ${err}`, 'error');
+                log(`Error details: ${JSON.stringify(err)}`, 'error');
+                console.error('Full error:', err);
+                throw err;
+            }
+        }
+
+        function handleIncomingMessage(eventJson) {
+            if (!groupIdHex) {
+                return;
+            }
+
+            const wrapperBytes = decodeWrapper(eventJson);
+            const processed = ingest_wrapper(aliceId, wrapperBytes);
+
+            if (processed.kind === 'application' && processed.message) {
+                const { content, author } = processed.message;
+                log(`Received message from ${author.slice(0, 16)}…: "${content}"`, 'success');
+                window.receivedMessages.push(content);
+            } else if (processed.kind === 'commit') {
+                window.receivedCommits += 1;
+                log('Processed commit wrapper', 'success');
+            } else {
+                log(`Unhandled wrapper kind: ${processed.kind}`, 'info');
+            }
+        }
+
+        function handleIncomingCommit(eventJson) {
+            if (!groupIdHex) {
+                return;
+            }
+
+            const wrapperBytes = decodeWrapper(eventJson);
+            const processed = ingest_wrapper(aliceId, wrapperBytes);
+            if (processed.kind === 'commit') {
+                log('Processed commit broadcast from Bob', 'success');
+                window.receivedCommits += 1;
+                try {
+                    merge_pending_commit(aliceId, groupIdHex);
+                } catch (err) {
+                    console.error('merge_pending_commit (alice) failed', err);
+                }
+            } else {
+                log(`Unexpected wrapper kind for commit: ${processed.kind}`, 'info');
+            }
+        }
+
+        channel.addEventListener('message', (event) => {
+            const data = event.data;
+            if (!data || data.from === ORIGIN) {
+                return;
+            }
+
+            switch (data.type) {
+                case 'key_package':
+                    handleKeyPackage(data);
+                    break;
+                case 'message':
+                    handleIncomingMessage(data.event);
+                    break;
+                case 'commit':
+                    handleIncomingCommit(data.event);
+                    break;
+                default:
+                    log(`Received unknown payload type: ${data.type}`, 'info');
+            }
+        });
+
+        async function main() {
+            try {
+                await initWasm();
+                log('WASM module loaded');
+
+                aliceId = create_identity(ALICE_SECRET);
+                alicePub = public_key(aliceId);
+                log(`Identity created: ${alicePub.slice(0, 16)}…`);
+
+                sendChannelMessage({ type: 'alice_pubkey', pubkey: alicePub });
+
+                statusEl.textContent = 'Waiting for Bob key package…';
+            } catch (err) {
+                log(`Initialization error: ${err}`, 'error');
+                statusEl.textContent = 'Error';
+                throw err;
+            }
+        }
+
+        window.sendMessage = async function (content) {
+            if (!groupIdHex) {
+                throw new Error('Group not established yet');
+            }
+
+            log(`Encrypting message: "${content}"`);
+            const rumor = {
+                pubkey: alicePub,
+                created_at: Math.floor(Date.now() / 1000),
+                kind: 9,
+                tags: [],
+                content,
+            };
+
+            const payload = { group_id_hex: groupIdHex, rumor };
+            const wrapperBytes = create_message(aliceId, payload);
+            const wrapperJson = encodeWrapper(wrapperBytes);
+
+            sendChannelMessage({ type: 'message', event: wrapperJson });
+            log('Encrypted wrapper broadcast', 'success');
+            return JSON.parse(wrapperJson);
+        };
+
+        window.sendCommit = async function () {
+            if (!groupIdHex) {
+                throw new Error('Group not established yet');
+            }
+
+            log('Creating self-update commit');
+            const update = self_update(aliceId, groupIdHex);
+            const commitJson = update.evolution_event;
+
+            sendChannelMessage({ type: 'commit', event: commitJson });
+            try {
+                merge_pending_commit(aliceId, groupIdHex);
+            } catch (err) {
+                console.error('merge_pending_commit (alice) failed', err);
+            }
+            log('Commit broadcast', 'success');
+            return JSON.parse(commitJson);
+        };
+
+        main();
+    </script>
+</body>
+</html>
