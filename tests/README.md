@@ -1,8 +1,8 @@
 # Phase 1 Step 2 – Browser Harness (No MoQ)
 
-This harness exercises the `mdk-wasm` control-plane bindings entirely in the browser.
+This harness exercises the `marmot-chat` control-plane bindings entirely in the browser.
 Two Playwright-controlled pages talk over a `BroadcastChannel`, but all MLS work is
-performed by the wasm module exported from `crates/mdk-wasm`.
+performed by the wasm module exported from `crates/marmot-chat`.
 
 ## Flow
 
@@ -24,7 +24,7 @@ npm test                       # headless Playwright run
 npm run test:headed            # watch the pages interact in a real browser
 ```
 
-The `npm run build:wasm` script wraps `wasm-pack build --target web --features with-mdk`
+The `npm run build:wasm` script wraps `wasm-pack build --target web`
 and materialises bindings into `tests/pkg/`. That directory is git-ignored and is safe to
 remove; just rerun the build step whenever the Rust code changes.
 

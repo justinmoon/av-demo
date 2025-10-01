@@ -4,7 +4,7 @@
   "description": "- plans/MOQ_MARMOT_AV_PLAN.md — Project plan (browser‑first: Text → Audio → Video) - MOQ_MARMOT_AV_SPEC.md — Spec for MoQ + Marmot A/V (auth, directory, AEAD, tracks) - MOQ_CHAT_SERVER.md — Binary Nostr relay (MoQ chat accelerator) design - NOSTR_AUTH.md — Self‑issued caps + write‑proof auth (JWT alternative)",
   "main": "index.js",
   "scripts": {
-    "build:wasm": "wasm-pack build crates/mdk-wasm --target web --out-dir ../../tests/pkg -- --features with-mdk",
+    "build:wasm": "wasm-pack build crates/marmot-chat --target web --out-dir ../../tests/pkg",
     "pretest": "npm run build:wasm",
     "test": "playwright test",
     "test:headed": "playwright test --headed"
