@@ -9,7 +9,7 @@ use mdk_memory_storage::MdkMemoryStorage;
 use moq_lite::{self, BroadcastConsumer, Track, TrackConsumer};
 use moq_native::ClientConfig;
 use nostr::{Event, EventBuilder, EventId, JsonUtil, Keys, Kind, RelayUrl, SecretKey};
-use sha2::{Digest, Sha256};
+use openmls::prelude::OpenMlsProvider;
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, timeout};
@@ -55,7 +55,7 @@ async fn mdk_wrappers_flow_over_local_moq() -> Result<()> {
         expected_messages,
     } = prepare_mls_state()?;
 
-    let root = derive_group_root(&group_id);
+    let root = derive_group_root(&bob_mdk, &group_id)?;
     let moq_url = Url::parse(&format!("https://127.0.0.1:{}/{}", port, root))?;
 
     let (start_tx, start_rx) = oneshot::channel();
@@ -227,13 +227,17 @@ fn process_wrappers(
     Ok(decrypted)
 }
 
-fn derive_group_root(group_id: &GroupId) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"moq-group-root-v1");
-    hasher.update(group_id.as_slice());
-    let digest = hasher.finalize();
-    let label = hex::encode(&digest[..16]);
-    format!("{AUTH_PUBLIC_ROOT}/{label}")
+fn derive_group_root(mdk: &MDK<MdkMemoryStorage>, group_id: &GroupId) -> Result<String> {
+    use openmls::group::MlsGroup;
+
+    let mut mls_group = MlsGroup::load(mdk.provider.storage(), group_id.inner())
+        .context("load MLS group for exporter")?
+        .ok_or_else(|| anyhow!("group not found in storage for exporter"))?;
+    let exported = mls_group
+        .export_secret(mdk.provider.crypto(), "moq-group-root-v1", &[], 16)
+        .context("export moq group root")?;
+
+    Ok(format!("{AUTH_PUBLIC_ROOT}/{}", hex::encode(exported)))
 }
 
 async fn publish_wrappers(

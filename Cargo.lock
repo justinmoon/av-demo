@@ -537,6 +537,7 @@ dependencies = [
  "moq-lite",
  "moq-native",
  "nostr",
+ "openmls",
  "quinn",
  "serde",
  "serde_json",

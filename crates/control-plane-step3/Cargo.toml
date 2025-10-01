@@ -27,3 +27,4 @@ quinn = { version = "0.11.9", default-features = false, features = ["platform-ve
 moq-lite = { version = "0.7.1", path = "/Users/justin/code/moq/moq/rs/moq" }
 moq-native = { version = "0.8.3", path = "/Users/justin/code/moq/moq/rs/moq-native" }
 web-transport-quinn = "0.8.1"
+openmls = "0.7"
