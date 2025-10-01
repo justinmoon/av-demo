@@ -96,6 +96,12 @@
       in
       {
         devShells.default = pkgs.mkShell {
+          nativeBuildInputs = [
+            pkgs.darwin.apple_sdk.frameworks.CoreServices
+            pkgs.darwin.apple_sdk.frameworks.Foundation
+            pkgs.darwin.apple_sdk.frameworks.Security
+          ];
+
           packages = [
             rustToolchain
             pkgs.rust-analyzer
