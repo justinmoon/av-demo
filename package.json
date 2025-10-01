@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "build:wasm": "wasm-pack build crates/marmot-chat --target web --out-dir ../../tests/pkg",
-    "pretest": "npm run build:wasm",
+    "build:ui": "tsc --project apps/chat-ui/tsconfig.json --noEmit && esbuild apps/chat-ui/main.ts --bundle --format=esm --target=es2020 --sourcemap --outfile=apps/chat-ui/dist/main.js --log-level=info --external:../../tests/pkg/*",
+    "build": "npm run build:wasm && npm run build:ui",
+    "pretest": "npm run build",
     "test": "playwright test",
     "test:headed": "playwright test --headed"
   },
@@ -15,6 +17,12 @@
   "type": "commonjs",
   "devDependencies": {
     "@playwright/test": "^1.55.1",
-    "playwright": "^1.55.1"
+    "esbuild": "^0.25.10",
+    "playwright": "^1.55.1",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@kixelated/moq": "^0.9.1",
+    "nostr-tools": "^2.17.0"
   }
 }
