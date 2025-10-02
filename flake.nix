@@ -96,6 +96,12 @@
       in
       {
         devShells.default = pkgs.mkShell {
+          nativeBuildInputs = [
+            pkgs.darwin.apple_sdk.frameworks.CoreServices
+            pkgs.darwin.apple_sdk.frameworks.Foundation
+            pkgs.darwin.apple_sdk.frameworks.Security
+          ];
+
           packages = [
             rustToolchain
             pkgs.rust-analyzer
@@ -107,6 +113,7 @@
             pkgs.llvmPackages_18.clang
             pkgs.llvmPackages_18.clang-unwrapped
             pkgs.llvmPackages_18.llvm
+            pkgs.nostr-rs-relay
             wasmClang
             wasmClangxx
             wasmAr

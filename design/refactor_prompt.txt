@@ -1,0 +1,45 @@
+Objective: Move the Marmot chat controller into Rust/wasm so all MLS, nostr handshake, MoQ transport, and future media encryption live in one state machine. The Solid-based UI should become a thin view layer that forwards intents to Rust and renders streamed events.
+
+Key requirements:
+1. Rust controller
+   - put it in marmot-chat/ crate
+   - Implement an explicit state machine managing:
+       a. Identity setup (create_identity, public_key).
+      b. Nostr handshake (key package / welcome exchange between creator/joiner roles).
+       c. MoQ connection, publisher/subscriber tracks, wrapper ingest.
+       d. Operation queue for side-effectful tasks (send message, publish key package, rotate commit). Keep in-memory for now (no persistence yet).
+   - Expose a wasm-bindgen API structured as:
+       ChatController::start(session_params, callbacks)
+       ChatController::send_message(content)
+       ChatController::rotate_epoch()
+       ChatController::shutdown()
+     The controller must push typed events back via a registered callback (status updates, message received, commits count, errors, transport state).
+   - Prepare for future media tracks: design operations so we can add StartMediaTrack/SendMediaFrame later.
+
+2. Service abstraction inside Rust
+   - identity service (wrap current MDK bindings).
+   - nostr service (websocket using web_sys/gloo; send/receive handshake JSON).
+   - moq service (wrap existing JS MoQ client for now via wasm_bindgen, but isolate behind a trait so we can swap in a Rust implementation later).
+
+3. Tests
+   - Write pure Rust unit tests for the state machine (drive events and assert transitions).
+   - Port existing wasm-pack regression (Phase 1 Step 4) to use the new controller: instantiate in wasm, feed deterministic backlog (no JS binding use).
+
+4. UI integration
+   - Replace current TypeScript runChat implementation with a thin wrapper:
+       - On mount, create ChatController, register callbacks that update Solid signals/stores, call start().
+       - Form submit calls controller.send_message, rotate button calls controller.rotate_epoch.
+       - On cleanup, call controller.shutdown.
+   - Remove DOM mutation logic from TS (no byId/appendChild).
+
+5. Build & tooling updates
+   - Update tsconfig/esbuild to consume new wasm package path.
+   - Ensure npm run build/test still functions (wasm-pack, esbuild, Playwright).
+
+Constraints & notes:
+- Keep everything in-memory for now; refreshing the page restarts the session.
+- Reuse the deterministic scenario fixtures for tests.
+- Maintain Playwright test harness (two browsers chat over MoQ) – it should use the new Rust controller via wasm.
+- Aim for clear separation: UI only sees ChatEvent/ChatRequest; Rust handles all transports.
+
+Deliverables: new Rust controller crate, updated wasm bindings, refactored Solid UI using event callbacks, passing wasm-pack + Playwright tests, and documentation/comments explaining the architecture.

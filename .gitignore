@@ -4,7 +4,9 @@ target/
 node_modules/
 tests/pkg/
 tests/wasm/
+apps/chat-ui/dist/
 test-results/
 playwright-report/
 worktrees/
 .direnv/
+nostr.db

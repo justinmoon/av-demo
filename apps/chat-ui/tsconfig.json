@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "Node",
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "lib": ["DOM", "ES2020"],
+    "types": ["node"],
+    "allowJs": false,
+    "noEmit": true
+  },
+  "include": ["src/**/*", "esbuild.config.mjs"],
+  "exclude": ["dist"]
+}

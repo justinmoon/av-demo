@@ -1,0 +1,257 @@
+:root {
+  color-scheme: dark light;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #121212;
+  color: #f1f1f1;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+}
+
+.chat-app {
+  width: min(720px, 100vw);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 1.5rem;
+  box-sizing: border-box;
+  gap: 1rem;
+}
+
+.chat-app__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chat-app__header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.status {
+  font-size: 0.9rem;
+  color: #8be9fd;
+}
+
+.info {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: #bdbdbd;
+}
+
+.chat-app__messages {
+  flex: 1;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-app__roster {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chat-app__roster h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #bdbdbd;
+}
+
+.chat-app__roster ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.chat-app__roster .member {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  color: #f1f1f1;
+}
+
+.chat-app__roster .member__pubkey {
+  font-family: 'Fira Code', 'SFMono-Regular', ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+.chat-app__roster .member__role {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(30, 136, 229, 0.2);
+  color: #8ab4f8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chat-app__invite {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-app__invite h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #bdbdbd;
+}
+
+.chat-app__invite form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chat-app__invite input[type='text'],
+.chat-app__invite input[type='checkbox'] {
+  font-family: inherit;
+}
+
+.chat-app__invite input[type='text'] {
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+}
+
+.chat-app__invite button {
+  align-self: flex-start;
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.5rem;
+  border: none;
+  background: #43a047;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-app__invite button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.chat-app__invite .invite-admin {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #bdbdbd;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.message--self {
+  align-self: flex-end;
+  background: rgba(56, 142, 255, 0.2);
+}
+
+.message__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.message__content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.95rem;
+}
+
+.chat-app__footer form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.chat-app__footer textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 2.5rem;
+  max-height: 6rem;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+}
+
+.chat-app__footer button {
+  padding: 0.6rem 1rem;
+  border-radius: 0.5rem;
+  border: none;
+  background: #1e88e5;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-app__footer button[type='button'] {
+  background: #424242;
+}
+
+.chat-app__footer button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+@media (max-width: 600px) {
+  .chat-app {
+    padding: 1rem;
+  }
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  font-size: 1rem;
+  color: #bdbdbd;
+}
