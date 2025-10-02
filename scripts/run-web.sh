@@ -113,8 +113,8 @@ Marmot chat UI is ready.
   Nostr:   ws://127.0.0.1:$nostr_port/
 
 Open two browser tabs:
-  http://127.0.0.1:$server_port/?role=alice&relay=http://127.0.0.1:$relay_port/marmot&nostr=ws://127.0.0.1:$nostr_port/&session=demo
-  http://127.0.0.1:$server_port/?role=bob&relay=http://127.0.0.1:$relay_port/marmot&nostr=ws://127.0.0.1:$nostr_port/&session=demo
+  http://127.0.0.1:$server_port/?role=creator&relay=http://127.0.0.1:$relay_port/marmot&nostr=ws://127.0.0.1:$nostr_port/&session=demo
+  http://127.0.0.1:$server_port/?role=joiner&relay=http://127.0.0.1:$relay_port/marmot&nostr=ws://127.0.0.1:$nostr_port/&session=demo
 
 Press Ctrl+C to stop both servers.
 INFO

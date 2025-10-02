@@ -136,7 +136,7 @@ export function ChatView(props: ChatViewProps) {
         <h1>Marmot Chat</h1>
         <div id="status" class="status">{status()}</div>
         <div class="info">
-          <span id="role">Role: {props.session.role}</span>
+          <span id="role">Role: {formatRole(props.session.role)}</span>
           <span id="relay">Relay: {props.session.relay}</span>
           <span id="nostr">Nostr: {props.session.nostr}</span>
           <button
@@ -203,4 +203,15 @@ function shortenKey(key: string, length = 6) {
   if (!key) return '';
   if (key.length <= length * 2 + 1) return key;
   return `${key.slice(0, length)}…${key.slice(-length)}`;
+}
+
+function formatRole(role: ChatSession['role']) {
+  switch (role) {
+    case 'creator':
+      return 'Creator';
+    case 'joiner':
+      return 'Joiner';
+    default:
+      return role;
+  }
 }

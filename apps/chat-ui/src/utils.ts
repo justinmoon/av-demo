@@ -87,7 +87,12 @@ export function loadSession(): ChatSession | null {
   try {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as ChatSession;
+    const parsed = JSON.parse(raw) as ChatSession;
+    if (parsed.role !== 'creator' && parsed.role !== 'joiner') {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
   } catch (err) {
     console.warn('Failed to load session', err);
     return null;

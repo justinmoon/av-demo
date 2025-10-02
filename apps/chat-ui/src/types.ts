@@ -1,4 +1,4 @@
-export type Role = 'alice' | 'bob';
+export type Role = 'creator' | 'joiner';
 
 export interface ChatSession {
   role: Role;
@@ -22,4 +22,3 @@ export interface ChatState {
   messages: ChatMessage[];
   commits: number;
 }
-

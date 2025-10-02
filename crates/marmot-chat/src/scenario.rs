@@ -13,8 +13,8 @@ use openmls::group::MlsGroup;
 use openmls::prelude::{KeyPackageBundle, OpenMlsProvider};
 use openmls_traits::storage::StorageProvider;
 
-pub const ALICE_SECRET: &str = "4d36e7068b0eeef39b4e2ff1f908db8b27c12075b1219777084ffcf86490b6ae";
-pub const BOB_SECRET: &str = "6e8a52c9ac36ca5293b156d8af4d7f6aeb52208419bd99c75472fc6f4321a5fd";
+pub const CREATOR_SECRET: &str = "4d36e7068b0eeef39b4e2ff1f908db8b27c12075b1219777084ffcf86490b6ae";
+pub const JOINER_SECRET: &str = "6e8a52c9ac36ca5293b156d8af4d7f6aeb52208419bd99c75472fc6f4321a5fd";
 
 const ROOT_PREFIX: &str = "marmot";
 const DEFAULT_TRACK: &str = "wrappers";
@@ -28,12 +28,12 @@ pub struct ConfigKeyPackage {
 }
 
 #[derive(Debug, Clone)]
-pub struct Phase4Config {
+pub struct ScenarioConfig {
     pub welcome_json: String,
-    pub bob_key_package: ConfigKeyPackage,
-    pub bob_secret_hex: String,
-    pub alice_pubkey: String,
-    pub bob_pubkey: String,
+    pub joiner_key_package: ConfigKeyPackage,
+    pub joiner_secret_hex: String,
+    pub creator_pubkey: String,
+    pub joiner_pubkey: String,
     pub group_id: GroupId,
     pub group_id_hex: String,
     pub group_root: String,
@@ -41,36 +41,36 @@ pub struct Phase4Config {
     pub inbox_track: String,
 }
 
-pub struct Phase4Scenario {
-    pub config: Phase4Config,
+pub struct DeterministicScenario {
+    pub config: ScenarioConfig,
     pub conversation: Conversation,
 }
 
-impl Phase4Scenario {
+impl DeterministicScenario {
     pub fn new() -> Result<Self> {
-        let mut alice = Participant::new("Alice", ALICE_SECRET)?;
-        let bob_keys = Keys::new(SecretKey::from_hex(BOB_SECRET)?);
+        let mut creator = Participant::new("Creator", CREATOR_SECRET)?;
+        let joiner_keys = Keys::new(SecretKey::from_hex(JOINER_SECRET)?);
 
-        let key_pkg = alice.generate_member_key_package(&bob_keys)?;
+        let key_pkg = creator.generate_member_key_package(&joiner_keys)?;
 
         let config = NostrGroupConfigData::new(
             "MoQ Demo".to_string(),
-            "Phase 1 Step 4".to_string(),
+            "Deterministic scenario".to_string(),
             None,
             None,
             None,
             vec![RelayUrl::parse("wss://relay.example.com").unwrap()],
-            vec![alice.keys.public_key(), bob_keys.public_key()],
+            vec![creator.keys.public_key(), joiner_keys.public_key()],
         );
 
-        let group_result = alice
+        let group_result = creator
             .mdk
             .create_group(
-                &alice.keys.public_key(),
+                &creator.keys.public_key(),
                 vec![key_pkg.event.clone()],
                 config,
             )
-            .context("alice create group")?;
+            .context("creator create group")?;
 
         let welcome = group_result
             .welcome_rumors
@@ -81,19 +81,19 @@ impl Phase4Scenario {
 
         let group_id = group_result.group.mls_group_id.clone();
         let group_id_hex = hex::encode(group_id.as_slice());
-        let group_root = derive_group_root(&alice.mdk, &group_id).context("derive group root")?;
+        let group_root = derive_group_root(&creator.mdk, &group_id).context("derive group root")?;
 
-        let alice_pubkey = alice.keys.public_key().to_hex();
-        let bob_pubkey = bob_keys.public_key().to_hex();
+        let creator_pubkey = creator.keys.public_key().to_hex();
+        let joiner_pubkey = joiner_keys.public_key().to_hex();
 
-        let conversation = Conversation::new(group_id.clone(), alice);
+        let conversation = Conversation::new(group_id.clone(), creator);
 
-        let config = Phase4Config {
+        let config = ScenarioConfig {
             welcome_json,
-            bob_key_package: key_pkg,
-            bob_secret_hex: BOB_SECRET.to_string(),
-            alice_pubkey,
-            bob_pubkey,
+            joiner_key_package: key_pkg,
+            joiner_secret_hex: JOINER_SECRET.to_string(),
+            creator_pubkey,
+            joiner_pubkey,
             group_id,
             group_id_hex,
             group_root,
@@ -110,30 +110,32 @@ impl Phase4Scenario {
 
 pub struct Conversation {
     group_id: GroupId,
-    alice: Participant,
+    creator: Participant,
     live_counter: u64,
 }
 
 impl Conversation {
-    pub fn new(group_id: GroupId, alice: Participant) -> Self {
+    pub fn new(group_id: GroupId, creator: Participant) -> Self {
         Self {
             group_id,
-            alice,
+            creator,
             live_counter: 0,
         }
     }
 
     pub fn initial_backlog(&mut self) -> Result<Vec<WrapperFrame>> {
         let mut frames = Vec::new();
-        frames
-            .push(self.send_message("Hello from Alice over MoQ!", Timestamp::from(1_700_000_001))?);
+        frames.push(self.send_message(
+            "Hello from the initiator over MoQ!",
+            Timestamp::from(1_700_000_001),
+        )?);
         frames.push(self.send_message(
             "Second message before rotation",
             Timestamp::from(1_700_000_002),
         )?);
         frames.push(self.rotate_epoch()?);
         frames.push(self.send_message(
-            "Post-rotation hello from Alice",
+            "Post-rotation hello from the initiator",
             Timestamp::from(1_700_000_003),
         )?);
         Ok(frames)
@@ -141,7 +143,7 @@ impl Conversation {
 
     pub fn next_live_frame(&mut self) -> Result<WrapperFrame> {
         self.live_counter += 1;
-        let content = format!("Live message {} from Alice", self.live_counter);
+        let content = format!("Live message {} from the initiator", self.live_counter);
         self.send_message(&content, Timestamp::now())
     }
 
@@ -149,25 +151,25 @@ impl Conversation {
         &self.group_id
     }
 
-    pub fn alice_mut(&mut self) -> &mut Participant {
-        &mut self.alice
+    pub fn creator_mut(&mut self) -> &mut Participant {
+        &mut self.creator
     }
 
     fn send_message(&mut self, content: &str, timestamp: Timestamp) -> Result<WrapperFrame> {
         let rumor = EventBuilder::new(Kind::TextNote, content)
             .custom_created_at(timestamp)
-            .build(self.alice.keys.public_key());
+            .build(self.creator.keys.public_key());
 
         let wrapper = self
-            .alice
+            .creator
             .mdk
             .create_message(&self.group_id, rumor)
-            .context("alice create message")?;
+            .context("creator create message")?;
 
         Ok(WrapperFrame {
             bytes: wrapper.as_json().into_bytes(),
             kind: WrapperKind::Application {
-                author: self.alice.keys.public_key().to_hex(),
+                author: self.creator.keys.public_key().to_hex(),
                 content: content.to_string(),
             },
         })
@@ -177,14 +179,14 @@ impl Conversation {
         let UpdateGroupResult {
             evolution_event, ..
         } = self
-            .alice
+            .creator
             .mdk
             .self_update(&self.group_id)
-            .context("alice self update")?;
+            .context("creator self update")?;
 
         let json = evolution_event.as_json();
         let event = Event::from_json(&json).context("commit event")?;
-        let _ = self.alice.ingest(&event, &self.group_id)?;
+        let _ = self.creator.ingest(&event, &self.group_id)?;
 
         Ok(WrapperFrame {
             bytes: json.into_bytes(),

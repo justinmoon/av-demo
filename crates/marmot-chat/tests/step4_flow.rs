@@ -4,19 +4,18 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use marmot_chat::controller::events::{ChatEvent, Role, SessionParams, StubConfig, StubWrapper};
-use marmot_chat::scenario::{Phase4Scenario, WrapperKind};
+use marmot_chat::scenario::{DeterministicScenario, WrapperKind};
 use marmot_chat::WasmChatController;
-use wasm_bindgen::JsValue;
 use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
 
 use gloo_timers::future::TimeoutFuture;
 use serde_wasm_bindgen as swb;
 
-
 #[wasm_bindgen_test]
 async fn bob_bootstrap_flow() {
-    let mut scenario = Phase4Scenario::new().expect("phase 4 fixture");
+    let mut scenario = DeterministicScenario::new().expect("deterministic scenario");
     let config = scenario.config.clone();
     let backlog_wrappers = scenario
         .conversation
@@ -34,19 +33,19 @@ async fn bob_bootstrap_flow() {
     let stub = StubConfig {
         backlog: stub_backlog,
         welcome: Some(config.welcome_json.clone()),
-        key_package_bundle: Some(config.bob_key_package.bundle.clone()),
-        key_package_event: Some(config.bob_key_package.event_json.clone()),
+        key_package_bundle: Some(config.joiner_key_package.bundle.clone()),
+        key_package_event: Some(config.joiner_key_package.event_json.clone()),
         group_id_hex: Some(config.group_id_hex.clone()),
         pause_after_frames: None,
     };
 
     let session = SessionParams {
-        role: Role::Bob,
+        role: Role::Joiner,
         relay_url: "stub://relay".to_string(),
         nostr_url: "stub://nostr".to_string(),
         session_id: "phase4".to_string(),
-        secret_hex: config.bob_secret_hex.clone(),
-        invitee_pubkey: Some(config.alice_pubkey.clone()),
+        secret_hex: config.joiner_secret_hex.clone(),
+        invitee_pubkey: Some(config.creator_pubkey.clone()),
         group_id_hex: Some(config.group_id_hex.clone()),
         stub: Some(stub),
     };

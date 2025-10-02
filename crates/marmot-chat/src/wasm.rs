@@ -2,18 +2,18 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::closure::Closure;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 
 use js_sys::{Function, Object, Reflect, Uint8Array};
-use serde_wasm_bindgen as swb;
 use serde_json::{json, Value as JsonValue};
+use serde_wasm_bindgen as swb;
 
-use serde::{Deserialize, Serialize};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
+use serde::{Deserialize, Serialize};
 use web_sys::{BinaryType, ErrorEvent, MessageEvent, WebSocket};
 
 use crate::controller::events::{ChatEvent, Role, SessionParams};
@@ -22,12 +22,12 @@ use crate::controller::services::{
     HandshakeMessageType, IdentityService, MoqListener, MoqService, NostrService,
 };
 use crate::controller::{ChatController, ControllerConfig};
-use nostr::event::Tag;
-use nostr::prelude::*;
-use nostr::{JsonUtil, TagKind};
 use mdk_core::{groups::NostrGroupConfigData, messages::MessageProcessingResult, MDK};
 use mdk_memory_storage::MdkMemoryStorage;
 use mdk_storage_traits::{groups::types::Group, GroupId};
+use nostr::event::Tag;
+use nostr::prelude::*;
+use nostr::{JsonUtil, TagKind};
 use openmls::prelude::{KeyPackageBundle, OpenMlsProvider};
 use openmls_traits::storage::StorageProvider;
 
@@ -153,7 +153,7 @@ impl JsNostrService {
                 keys: RefCell::new(None),
                 session: RefCell::new(None),
                 url: RefCell::new(None),
-                role: RefCell::new(Role::Alice),
+                role: RefCell::new(Role::Creator),
                 on_message: RefCell::new(None),
                 on_open: RefCell::new(None),
                 on_error: RefCell::new(None),
@@ -178,7 +178,11 @@ impl NostrService for JsNostrService {
 }
 
 impl JsNostrState {
-    fn connect_rc(state: Rc<JsNostrState>, params: HandshakeConnectParams, listener: Box<dyn HandshakeListener>) {
+    fn connect_rc(
+        state: Rc<JsNostrState>,
+        params: HandshakeConnectParams,
+        listener: Box<dyn HandshakeListener>,
+    ) {
         *state.listener.borrow_mut() = Some(listener);
         *state.role.borrow_mut() = params.role;
         *state.session.borrow_mut() = Some(params.session.clone());
@@ -251,7 +255,10 @@ impl JsNostrState {
             .map_err(|err| js_error(format!("handshake payload serialize error: {err}")))?;
         let tags = vec![
             Tag::custom(TagKind::custom("t"), [session.clone()]),
-            Tag::custom(TagKind::custom("type"), [payload.message_type.as_str().to_string()]),
+            Tag::custom(
+                TagKind::custom("type"),
+                [payload.message_type.as_str().to_string()],
+            ),
             Tag::custom(TagKind::custom("role"), [role.as_str().to_string()]),
         ];
 
@@ -298,9 +305,10 @@ impl JsNostrState {
 
     fn install_handlers(state: Rc<JsNostrState>, socket: &WebSocket) {
         let state_for_message = state.clone();
-        let message_closure = Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-            JsNostrState::handle_message(&state_for_message, event);
-        }));
+        let message_closure =
+            Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
+                JsNostrState::handle_message(&state_for_message, event);
+            }));
         socket.set_onmessage(Some(message_closure.as_ref().unchecked_ref()));
         *state.on_message.borrow_mut() = Some(message_closure);
 
@@ -311,9 +319,10 @@ impl JsNostrState {
         socket.set_onopen(Some(open_closure.as_ref().unchecked_ref()));
         *state.on_open.borrow_mut() = Some(open_closure);
 
-        let error_closure = Closure::<dyn FnMut(ErrorEvent)>::wrap(Box::new(move |event: ErrorEvent| {
-            log::error!("handshake websocket error: {}", event.message());
-        }));
+        let error_closure =
+            Closure::<dyn FnMut(ErrorEvent)>::wrap(Box::new(move |event: ErrorEvent| {
+                log::error!("handshake websocket error: {}", event.message());
+            }));
         socket.set_onerror(Some(error_closure.as_ref().unchecked_ref()));
         *state.on_error.borrow_mut() = Some(error_closure);
     }
@@ -421,7 +430,11 @@ fn handshake_payload(session: &str, role: Role, message: &HandshakeMessage) -> J
     });
     match &message.data {
         HandshakeMessageBody::None => {}
-        HandshakeMessageBody::KeyPackage { event, bundle, pubkey } => {
+        HandshakeMessageBody::KeyPackage {
+            event,
+            bundle,
+            pubkey,
+        } => {
             if let Some(obj) = base.as_object_mut() {
                 obj.insert("event".to_string(), json!(event));
                 if let Some(bundle) = bundle {
@@ -432,7 +445,10 @@ fn handshake_payload(session: &str, role: Role, message: &HandshakeMessage) -> J
                 }
             }
         }
-        HandshakeMessageBody::Welcome { welcome, group_id_hex } => {
+        HandshakeMessageBody::Welcome {
+            welcome,
+            group_id_hex,
+        } => {
             if let Some(obj) = base.as_object_mut() {
                 obj.insert("welcome".to_string(), json!(welcome));
                 if let Some(group) = group_id_hex {
@@ -461,7 +477,11 @@ fn handshake_from_payload(payload: &JsonValue) -> Option<HandshakeMessage> {
                 .get("pubkey")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            HandshakeMessageBody::KeyPackage { event, bundle, pubkey }
+            HandshakeMessageBody::KeyPackage {
+                event,
+                bundle,
+                pubkey,
+            }
         }
         HandshakeMessageType::Welcome => {
             let welcome = payload.get("welcome")?.as_str()?.to_string();
@@ -532,7 +552,14 @@ impl JsMoqService {
 }
 
 impl MoqService for JsMoqService {
-    fn connect(&self, url: &str, session: &str, role: Role, peer_role: Role, listener: Box<dyn MoqListener>) {
+    fn connect(
+        &self,
+        url: &str,
+        session: &str,
+        role: Role,
+        peer_role: Role,
+        listener: Box<dyn MoqListener>,
+    ) {
         *self.listener.borrow_mut() = Some(listener);
         let bridge = match get_moq_bridge() {
             Ok(obj) => obj,
@@ -579,7 +606,9 @@ impl MoqService for JsMoqService {
 
         let listener_for_error = listener_cell.clone();
         let on_error_closure = Closure::wrap(Box::new(move |value: JsValue| {
-            let message = value.as_string().unwrap_or_else(|| String::from("unknown error"));
+            let message = value
+                .as_string()
+                .unwrap_or_else(|| String::from("unknown error"));
             if let Some(listener) = listener_for_error.borrow().as_ref() {
                 listener.on_error(message);
             }
@@ -593,10 +622,26 @@ impl MoqService for JsMoqService {
         }) as Box<dyn FnMut()>);
 
         let callbacks_obj = Object::new();
-        let _ = Reflect::set(&callbacks_obj, &JsValue::from_str("onReady"), on_ready_closure.as_ref());
-        let _ = Reflect::set(&callbacks_obj, &JsValue::from_str("onFrame"), on_frame_closure.as_ref());
-        let _ = Reflect::set(&callbacks_obj, &JsValue::from_str("onError"), on_error_closure.as_ref());
-        let _ = Reflect::set(&callbacks_obj, &JsValue::from_str("onClosed"), on_closed_closure.as_ref());
+        let _ = Reflect::set(
+            &callbacks_obj,
+            &JsValue::from_str("onReady"),
+            on_ready_closure.as_ref(),
+        );
+        let _ = Reflect::set(
+            &callbacks_obj,
+            &JsValue::from_str("onFrame"),
+            on_frame_closure.as_ref(),
+        );
+        let _ = Reflect::set(
+            &callbacks_obj,
+            &JsValue::from_str("onError"),
+            on_error_closure.as_ref(),
+        );
+        let _ = Reflect::set(
+            &callbacks_obj,
+            &JsValue::from_str("onClosed"),
+            on_closed_closure.as_ref(),
+        );
 
         *self.on_ready.borrow_mut() = Some(on_ready_closure);
         *self.on_frame.borrow_mut() = Some(on_frame_closure);
@@ -821,7 +866,8 @@ fn parse_public_keys(keys: &[String]) -> Result<Vec<PublicKey>, JsValue> {
 
 #[wasm_bindgen]
 pub fn create_identity(secret_hex: String) -> Result<u32, JsValue> {
-    let secret = SecretKey::from_hex(&secret_hex).map_err(|e| js_error(format!("invalid secret: {e}")))?;
+    let secret =
+        SecretKey::from_hex(&secret_hex).map_err(|e| js_error(format!("invalid secret: {e}")))?;
     let keys = Keys::new(secret);
     let identity = LegacyIdentity {
         keys,
@@ -905,9 +951,11 @@ pub fn export_key_package_bundle(identity_id: u32, event_json: String) -> Result
             bundle: encoded,
         };
 
-        swb::to_value(&export).map_err(|e| js_error(format!(
-            "failed to serialize exported key package bundle: {e}"
-        )))
+        swb::to_value(&export).map_err(|e| {
+            js_error(format!(
+                "failed to serialize exported key package bundle: {e}"
+            ))
+        })
     })
 }
 
@@ -1084,8 +1132,8 @@ pub fn accept_welcome(identity_id: u32, welcome_json: String) -> Result<JsValue,
 #[wasm_bindgen]
 pub fn create_message(identity_id: u32, payload: JsValue) -> Result<Uint8Array, JsValue> {
     with_identity(identity_id, |identity| {
-        let input: CreateMessageInput =
-            swb::from_value(payload).map_err(|e| js_error(format!("invalid message payload: {e}")))?;
+        let input: CreateMessageInput = swb::from_value(payload)
+            .map_err(|e| js_error(format!("invalid message payload: {e}")))?;
         let rumor_bytes = serde_json::to_vec(&input.rumor)
             .map_err(|e| js_error(format!("failed to serialize rumor: {e}")))?;
         let rumor = UnsignedEvent::from_json(&rumor_bytes)
@@ -1107,7 +1155,8 @@ pub fn ingest_wrapper(identity_id: u32, wrapper: Uint8Array) -> Result<JsValue, 
         let mut bytes = vec![0u8; wrapper.length() as usize];
         wrapper.copy_to(&mut bytes[..]);
         let json = String::from_utf8(bytes).map_err(|e| js_error(format!("invalid utf8: {e}")))?;
-        let event = Event::from_json(&json).map_err(|e| js_error(format!("invalid wrapper: {e}")))?;
+        let event =
+            Event::from_json(&json).map_err(|e| js_error(format!("invalid wrapper: {e}")))?;
         let result = identity
             .mdk
             .process_message(&event)
@@ -1152,7 +1201,8 @@ pub fn ingest_wrapper(identity_id: u32, wrapper: Uint8Array) -> Result<JsValue, 
                 commit: None,
             },
         };
-        swb::to_value(&processed).map_err(|e| js_error(format!("failed to serialize processed wrapper: {e}")))
+        swb::to_value(&processed)
+            .map_err(|e| js_error(format!("failed to serialize processed wrapper: {e}")))
     })
 }
 

@@ -133,7 +133,7 @@ export function Onboarding(props: OnboardingProps) {
     setNostrUrl(parsed.nostr);
     setSessionId(parsed.session);
     const session: ChatSession = {
-      role: 'bob',
+      role: 'joiner',
       relay: parsed.relay,
       nostr: parsed.nostr,
       sessionId: parsed.session,
@@ -145,7 +145,7 @@ export function Onboarding(props: OnboardingProps) {
 
   const enterChat = () => {
     const session: ChatSession = {
-      role: 'alice',
+      role: 'creator',
       relay: relayUrl(),
       nostr: nostrUrl(),
       sessionId: sessionId(),

@@ -5,7 +5,7 @@ Key requirements:
    - put it in marmot-chat/ crate
    - Implement an explicit state machine managing:
        a. Identity setup (create_identity, public_key).
-       b. Nostr handshake (key package / welcome exchange between Alice/Bob).
+      b. Nostr handshake (key package / welcome exchange between creator/joiner roles).
        c. MoQ connection, publisher/subscriber tracks, wrapper ingest.
        d. Operation queue for side-effectful tasks (send message, publish key package, rotate commit). Keep in-memory for now (no persistence yet).
    - Expose a wasm-bindgen API structured as:
@@ -38,7 +38,7 @@ Key requirements:
 
 Constraints & notes:
 - Keep everything in-memory for now; refreshing the page restarts the session.
-- Reuse existing Phase4Scenario data for deterministic tests.
+- Reuse the deterministic scenario fixtures for tests.
 - Maintain Playwright test harness (two browsers chat over MoQ) – it should use the new Rust controller via wasm.
 - Aim for clear separation: UI only sees ChatEvent/ChatRequest; Rust handles all transports.
 

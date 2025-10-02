@@ -62,8 +62,8 @@ impl ControllerState {
     pub fn new(config: ControllerConfig) -> Self {
         let role = config.session.role;
         let handshake = match role {
-            Role::Alice => HandshakeState::WaitingForKeyPackage,
-            Role::Bob => HandshakeState::WaitingForWelcome,
+            Role::Creator => HandshakeState::WaitingForKeyPackage,
+            Role::Joiner => HandshakeState::WaitingForWelcome,
         };
         Self {
             identity: config.identity,
@@ -115,7 +115,9 @@ impl ControllerState {
             crate::controller::services::WrapperOutcome::Commit => {
                 self.identity.merge_pending_commit()?;
                 self.commits += 1;
-                Ok(vec![ChatEvent::Commit { total: self.commits }])
+                Ok(vec![ChatEvent::Commit {
+                    total: self.commits,
+                }])
             }
             crate::controller::services::WrapperOutcome::None => Ok(Vec::new()),
         }
@@ -136,7 +138,12 @@ impl ControllerState {
     pub fn handle_self_update(&mut self) -> Result<(Vec<u8>, Vec<ChatEvent>)> {
         let frame = self.identity.self_update()?;
         self.commits += 1;
-        Ok((frame.bytes, vec![ChatEvent::Commit { total: self.commits }]))
+        Ok((
+            frame.bytes,
+            vec![ChatEvent::Commit {
+                total: self.commits,
+            }],
+        ))
     }
 
     pub fn handshake_phase(&self) -> HandshakePhase {
@@ -185,14 +192,17 @@ impl ControllerState {
         self.emit_handshake_phase(self.handshake_phase());
 
         match self.session.role {
-            Role::Alice => {
+            Role::Creator => {
                 self.emit_status("Requesting key package…");
-                schedule(tx, Operation::OutgoingHandshake(HandshakeMessage {
-                    message_type: HandshakeMessageType::RequestKeyPackage,
-                    data: HandshakeMessageBody::None,
-                }));
+                schedule(
+                    tx,
+                    Operation::OutgoingHandshake(HandshakeMessage {
+                        message_type: HandshakeMessageType::RequestKeyPackage,
+                        data: HandshakeMessageBody::None,
+                    }),
+                );
             }
-            Role::Bob => {
+            Role::Joiner => {
                 self.emit_status("Generating key package…");
                 let export = if let Some(stub) = self.session.stub.clone() {
                     if let Some(event) = stub.key_package_event {
@@ -215,14 +225,17 @@ impl ControllerState {
                     self.key_package_cache = Some(export.clone());
                     export
                 };
-                schedule(tx, Operation::OutgoingHandshake(HandshakeMessage {
-                    message_type: HandshakeMessageType::KeyPackage,
-                    data: HandshakeMessageBody::KeyPackage {
-                        event: export.event_json,
-                        bundle: Some(export.bundle.clone()),
-                        pubkey: Some(self.identity.public_key_hex()),
-                    },
-                }));
+                schedule(
+                    tx,
+                    Operation::OutgoingHandshake(HandshakeMessage {
+                        message_type: HandshakeMessageType::KeyPackage,
+                        data: HandshakeMessageBody::KeyPackage {
+                            event: export.event_json,
+                            bundle: Some(export.bundle.clone()),
+                            pubkey: Some(self.identity.public_key_hex()),
+                        },
+                    }),
+                );
             }
         }
 
@@ -235,12 +248,12 @@ impl ControllerState {
         message: HandshakeMessage,
     ) -> Result<()> {
         match self.session.role {
-            Role::Alice => self.handle_handshake_as_alice(tx, message),
-            Role::Bob => self.handle_handshake_as_bob(tx, message),
+            Role::Creator => self.handle_handshake_as_creator(tx, message),
+            Role::Joiner => self.handle_handshake_as_joiner(tx, message),
         }
     }
 
-    fn handle_handshake_as_alice(
+    fn handle_handshake_as_creator(
         &mut self,
         tx: &UnboundedSender<Operation>,
         message: HandshakeMessage,
@@ -248,9 +261,11 @@ impl ControllerState {
         match message.message_type {
             HandshakeMessageType::KeyPackage => {
                 let (event, bundle, pubkey) = match message.data {
-                    HandshakeMessageBody::KeyPackage { event, bundle, pubkey } => {
-                        (event, bundle, pubkey)
-                    }
+                    HandshakeMessageBody::KeyPackage {
+                        event,
+                        bundle,
+                        pubkey,
+                    } => (event, bundle, pubkey),
                     _ => return Err(anyhow!("missing key package payload")),
                 };
                 let invitee_pub = pubkey
@@ -305,7 +320,7 @@ impl ControllerState {
         }
     }
 
-    fn handle_handshake_as_bob(
+    fn handle_handshake_as_joiner(
         &mut self,
         tx: &UnboundedSender<Operation>,
         message: HandshakeMessage,
@@ -313,7 +328,10 @@ impl ControllerState {
         match message.message_type {
             HandshakeMessageType::Welcome => {
                 let (welcome, group_id_hex) = match message.data {
-                    HandshakeMessageBody::Welcome { welcome, group_id_hex } => (welcome, group_id_hex),
+                    HandshakeMessageBody::Welcome {
+                        welcome,
+                        group_id_hex,
+                    } => (welcome, group_id_hex),
                     _ => return Err(anyhow!("missing welcome payload")),
                 };
                 if let Some(export) = self.key_package_cache.clone() {
@@ -327,17 +345,21 @@ impl ControllerState {
                     if provided != accepted_group {
                         log::warn!(
                             "Provided group id {} differs from accepted {}",
-                            provided, accepted_group
+                            provided,
+                            accepted_group
                         );
                     }
                 }
                 self.handshake = HandshakeState::Established;
                 self.emit_handshake_phase(HandshakePhase::Finalizing);
                 schedule(tx, Operation::ConnectMoq);
-                schedule(tx, Operation::Emit(ChatEvent::status(format!(
-                    "Joined group {}",
-                    self.identity.group_id_hex().unwrap_or_default()
-                ))));
+                schedule(
+                    tx,
+                    Operation::Emit(ChatEvent::status(format!(
+                        "Joined group {}",
+                        self.identity.group_id_hex().unwrap_or_default()
+                    ))),
+                );
                 Ok(())
             }
             HandshakeMessageType::RequestKeyPackage => {
@@ -385,7 +407,11 @@ fn schedule(tx: &UnboundedSender<Operation>, op: Operation) {
 fn relay_relays_url(url: &str) -> String {
     url.parse::<url::Url>()
         .map(|parsed| {
-            let scheme = if parsed.scheme() == "https" { "wss" } else { "wss" };
+            let scheme = if parsed.scheme() == "https" {
+                "wss"
+            } else {
+                "wss"
+            };
             format!("{scheme}://{}", parsed.host_str().unwrap_or("localhost"))
         })
         .unwrap_or_else(|_| "wss://localhost".to_string())
@@ -399,11 +425,11 @@ mod tests {
     use super::*;
     use crate::controller::events::{ChatEvent, StubConfig};
     use crate::controller::services::{stub, IdentityService};
-    use crate::scenario::{Phase4Scenario, WrapperKind};
+    use crate::scenario::{DeterministicScenario, WrapperKind};
 
     #[test]
     fn ingest_backlog_matches_expected_messages() {
-        let mut scenario = Phase4Scenario::new().expect("phase 4 scenario");
+        let mut scenario = DeterministicScenario::new().expect("deterministic scenario");
         let config = scenario.config.clone();
 
         let wrappers = scenario
@@ -412,19 +438,19 @@ mod tests {
             .expect("initial backlog");
 
         let session = SessionParams {
-            role: Role::Bob,
+            role: Role::Joiner,
             relay_url: "stub://relay".to_string(),
             nostr_url: "stub://nostr".to_string(),
             session_id: "test-session".to_string(),
-            secret_hex: config.bob_secret_hex.clone(),
-            invitee_pubkey: Some(config.alice_pubkey.clone()),
+            secret_hex: config.joiner_secret_hex.clone(),
+            invitee_pubkey: Some(config.creator_pubkey.clone()),
             group_id_hex: Some(config.group_id_hex.clone()),
             stub: Some(StubConfig::default()),
         };
 
         let identity = IdentityService::create(&session.secret_hex).expect("identity");
         identity
-            .import_key_package_bundle(&config.bob_key_package.bundle)
+            .import_key_package_bundle(&config.joiner_key_package.bundle)
             .expect("import bundle");
         let accepted_group = identity
             .accept_welcome(&config.welcome_json)
@@ -475,7 +501,10 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(observed_messages, expected_messages, "message order mismatch");
+        assert_eq!(
+            observed_messages, expected_messages,
+            "message order mismatch"
+        );
 
         let commit_events = ordered_events
             .iter()

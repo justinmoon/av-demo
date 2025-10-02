@@ -165,10 +165,7 @@ impl IdentityHandle {
         let mut accepted_group: Option<Group> = None;
         if let Ok(mut welcomes) = self.mdk.get_pending_welcomes() {
             for welcome in welcomes.iter() {
-                self
-                    .mdk
-                    .accept_welcome(welcome)
-                    .context("accept welcome")?;
+                self.mdk.accept_welcome(welcome).context("accept welcome")?;
             }
             if let Some(latest) = welcomes.pop() {
                 if let Ok(groups) = self.mdk.get_groups() {
@@ -179,7 +176,8 @@ impl IdentityHandle {
             }
         }
 
-        let group = accepted_group.ok_or_else(|| anyhow!("accepted welcome but group not found"))?;
+        let group =
+            accepted_group.ok_or_else(|| anyhow!("accepted welcome but group not found"))?;
         *self.group_id.borrow_mut() = Some(group.mls_group_id.clone());
         Ok(hex::encode(group.mls_group_id.as_slice()))
     }
@@ -198,9 +196,8 @@ impl IdentityHandle {
                 created_at: msg.created_at.as_u64(),
             }),
             MessageProcessingResult::Commit => Ok(WrapperOutcome::Commit),
-            MessageProcessingResult::Proposal(_) | MessageProcessingResult::ExternalJoinProposal => {
-                Ok(WrapperOutcome::None)
-            }
+            MessageProcessingResult::Proposal(_)
+            | MessageProcessingResult::ExternalJoinProposal => Ok(WrapperOutcome::None),
             MessageProcessingResult::Unprocessable => Ok(WrapperOutcome::None),
         }
     }
@@ -233,12 +230,8 @@ impl IdentityHandle {
     pub fn self_update(&self) -> Result<WrapperFrame> {
         let group_id = self.group_id()?;
         let UpdateGroupResult {
-            evolution_event,
-            ..
-        } = self
-            .mdk
-            .self_update(&group_id)
-            .context("self update")?;
+            evolution_event, ..
+        } = self.mdk.self_update(&group_id).context("self update")?;
         let json = evolution_event.as_json();
         let _event = Event::from_json(&json).context("commit event")?;
         let _ = self.ingest_wrapper(json.as_bytes())?;
@@ -366,7 +359,14 @@ pub trait MoqListener {
 }
 
 pub trait MoqService {
-    fn connect(&self, url: &str, session: &str, role: Role, peer_role: Role, listener: Box<dyn MoqListener>);
+    fn connect(
+        &self,
+        url: &str,
+        session: &str,
+        role: Role,
+        peer_role: Role,
+        listener: Box<dyn MoqListener>,
+    );
     fn publish_wrapper(&self, bytes: &[u8]);
     fn shutdown(&self);
 }
@@ -439,11 +439,11 @@ pub mod stub {
         fn connect(&self, _params: HandshakeConnectParams, listener: Box<dyn HandshakeListener>) {
             *self.listener.borrow_mut() = Some(listener);
             match self.role {
-                Role::Bob => {
+                Role::Joiner => {
                     self.emit_key_package();
                     self.emit_welcome();
                 }
-                Role::Alice => {}
+                Role::Creator => {}
             }
         }
 

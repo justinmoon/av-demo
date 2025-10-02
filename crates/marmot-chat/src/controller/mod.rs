@@ -145,10 +145,7 @@ impl ChatRuntime {
                 (self.state.borrow().callback)(event);
             }
             Operation::SendText(content) => {
-                let result = self
-                    .state
-                    .borrow_mut()
-                    .handle_outgoing_message(&content);
+                let result = self.state.borrow_mut().handle_outgoing_message(&content);
                 match result {
                     Ok((bytes, event)) => {
                         let _ = self.op_tx.unbounded_send(Operation::PublishWrapper(bytes));
@@ -178,7 +175,10 @@ impl ChatRuntime {
 
     fn emit_error(&self, err: anyhow::Error) {
         let message = format!("{err:#}");
-        if let Ok(_) = self.op_tx.unbounded_send(Operation::Emit(ChatEvent::error(message.clone()))) {
+        if let Ok(_) = self
+            .op_tx
+            .unbounded_send(Operation::Emit(ChatEvent::error(message.clone())))
+        {
             log::error!("controller error: {message}");
         }
     }
@@ -190,7 +190,9 @@ struct ControllerHandshakeListener {
 
 impl HandshakeListener for ControllerHandshakeListener {
     fn on_message(&self, message: HandshakeMessage) {
-        let _ = self.op_tx.unbounded_send(Operation::IncomingHandshake(message));
+        let _ = self
+            .op_tx
+            .unbounded_send(Operation::IncomingHandshake(message));
     }
 }
 
@@ -214,8 +216,8 @@ impl MoqListener for ControllerMoqListener {
     }
 
     fn on_closed(&self) {
-        let _ = self.op_tx.unbounded_send(Operation::Emit(ChatEvent::status(
-            "MoQ connection closed",
-        )));
+        let _ = self
+            .op_tx
+            .unbounded_send(Operation::Emit(ChatEvent::status("MoQ connection closed")));
     }
 }

@@ -3,29 +3,29 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
-    Alice,
-    Bob,
+    Creator,
+    Joiner,
 }
 
 impl Role {
     pub fn peer(self) -> Role {
         match self {
-            Role::Alice => Role::Bob,
-            Role::Bob => Role::Alice,
+            Role::Creator => Role::Joiner,
+            Role::Joiner => Role::Creator,
         }
     }
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            Role::Alice => "alice",
-            Role::Bob => "bob",
+            Role::Creator => "creator",
+            Role::Joiner => "joiner",
         }
     }
 
     pub fn from_str(value: &str) -> Option<Role> {
         match value {
-            "alice" => Some(Role::Alice),
-            "bob" => Some(Role::Bob),
+            "creator" => Some(Role::Creator),
+            "joiner" => Some(Role::Joiner),
             _ => None,
         }
     }
@@ -71,12 +71,27 @@ pub struct StubWrapper {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatEvent {
-    Status { text: String },
-    Ready { ready: bool },
-    Message { author: String, content: String, created_at: u64, local: bool },
-    Commit { total: u32 },
-    Error { message: String },
-    Handshake { phase: HandshakePhase },
+    Status {
+        text: String,
+    },
+    Ready {
+        ready: bool,
+    },
+    Message {
+        author: String,
+        content: String,
+        created_at: u64,
+        local: bool,
+    },
+    Commit {
+        total: u32,
+    },
+    Error {
+        message: String,
+    },
+    Handshake {
+        phase: HandshakePhase,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

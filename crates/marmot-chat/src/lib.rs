@@ -1,5 +1,5 @@
-pub mod scenario;
 pub mod controller;
+pub mod scenario;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
