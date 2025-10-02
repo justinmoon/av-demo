@@ -10,7 +10,7 @@ use crate::controller::services::{
     HandshakeMessageBody, HandshakeMessageType, KeyPackageExport,
 };
 
-use super::core::{ControllerState, HandshakeState, Operation, PendingInvite};
+use super::types::{ControllerState, HandshakeState, Operation, PendingInvite};
 use super::utils::{relay_relays_url, schedule, short_key};
 
 impl ControllerState {

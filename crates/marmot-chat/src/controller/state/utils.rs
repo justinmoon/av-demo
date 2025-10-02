@@ -1,6 +1,6 @@
 use futures::channel::mpsc::UnboundedSender;
 
-use super::core::Operation;
+use super::types::Operation;
 
 pub(super) fn now_timestamp() -> u64 {
     #[cfg(target_arch = "wasm32")]
