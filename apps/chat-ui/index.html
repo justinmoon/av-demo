@@ -5,53 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Marmot Chat</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        window.__MARMOT_DEFAULTS = {
+          relay: params.get('relay') || undefined,
+          nostr: params.get('nostr') || undefined,
+        };
+      })();
+    </script>
   </head>
   <body>
-    <main class="chat-app">
-      <header class="chat-app__header">
-        <h1>Marmot Chat</h1>
-        <div id="status" class="status">Loading…</div>
-        <div class="info">
-          <span id="role"></span>
-          <span id="relay"></span>
-          <span id="nostr"></span>
-        </div>
-      </header>
-
-      <section class="chat-app__messages" id="messages" aria-live="polite"></section>
-
-      <footer class="chat-app__footer">
-        <form id="composer" autocomplete="off">
-          <label class="sr-only" for="message">Message</label>
-          <textarea
-            id="message"
-            name="message"
-            rows="2"
-            placeholder="Type a message…"
-            required
-          ></textarea>
-          <button type="submit">Send</button>
-          <button type="button" id="rotate">Rotate Epoch</button>
-        </form>
-      </footer>
-    </main>
-
-    <dialog id="help">
-      <h2>Usage</h2>
-      <p>
-        Open this page in two tabs with different roles, for example:
-      </p>
-      <pre><code>?role=alice&amp;relay=http://127.0.0.1:4443&amp;nostr=ws://127.0.0.1:7447/&amp;session=mydemo
-?role=bob&amp;relay=http://127.0.0.1:4443&amp;nostr=ws://127.0.0.1:7447/&amp;session=mydemo</code></pre>
-      <p>
-        The <code>session</code> parameter isolates BroadcastChannel handshakes. Make
-        sure both tabs use the same session value.
-      </p>
-      <form method="dialog">
-        <button>Close</button>
-      </form>
-    </dialog>
-
+    <div id="root"></div>
     <script type="module" src="./dist/main.js"></script>
   </body>
 </html>

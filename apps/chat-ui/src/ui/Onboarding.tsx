@@ -1,0 +1,333 @@
+import { createSignal, Show, Match, Switch, createEffect } from 'solid-js';
+import { getPublicKey } from 'nostr-tools';
+import {
+  normalizeSecret,
+  normalizeHex,
+  randomHex,
+  shortenKey,
+  parseInvite,
+  persistSession,
+  hexToBytes,
+} from '../utils';
+import type { ChatSession } from '../types';
+
+export interface OnboardingResult {
+  session: ChatSession;
+}
+
+interface Defaults {
+  relay?: string;
+  nostr?: string;
+}
+
+interface OnboardingProps {
+  defaults: Defaults;
+  onComplete(result: OnboardingResult): void;
+}
+
+type Step = 'login' | 'mode' | 'create' | 'invite' | 'join';
+
+declare global {
+  interface Nip07 {
+    getPublicKey(): Promise<string>;
+    getSecretKey?(): Promise<string>;
+  }
+}
+
+export function Onboarding(props: OnboardingProps) {
+  const [step, setStep] = createSignal<Step>('login');
+  const [pubkey, setPubkey] = createSignal<string>('');
+  const [secretHex, setSecretHex] = createSignal<string>('');
+  const [loginError, setLoginError] = createSignal<string>('');
+  const [relayUrl, setRelayUrl] = createSignal(props.defaults.relay ?? 'http://127.0.0.1:54943/marmot');
+  const [nostrUrl, setNostrUrl] = createSignal(props.defaults.nostr ?? 'ws://127.0.0.1:7447/');
+  const [inviteePub, setInviteePub] = createSignal('');
+  const [inviteLink, setInviteLink] = createSignal('');
+  const [sessionId, setSessionId] = createSignal('');
+  const [joinError, setJoinError] = createSignal('');
+  const [createError, setCreateError] = createSignal('');
+  const [joinCode, setJoinCode] = createSignal('');
+  let manualSecretInputRef: HTMLInputElement | undefined;
+
+  createEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const inviteParam = params.get('invite');
+    if (inviteParam) {
+      try {
+        const decoded = decodeURIComponent(inviteParam);
+        setJoinCode(decoded);
+      } catch {
+        setJoinCode(inviteParam);
+      }
+    }
+  });
+
+  const finalizeLogin = (secret: string, publicKey: string) => {
+    setSecretHex(secret);
+    setPubkey(publicKey);
+    setLoginError('');
+    setStep('mode');
+  };
+
+  const handleWalletConnect = async () => {
+    setLoginError('');
+    try {
+      const nostr = (window as any).nostr as Nip07 | undefined;
+      if (!nostr) {
+        throw new Error('No NIP-07 wallet found');
+      }
+      const [pub, secretMaybe] = await Promise.all([
+        nostr.getPublicKey(),
+        nostr.getSecretKey ? nostr.getSecretKey() : Promise.reject(new Error('Wallet refused to share secret key')),
+      ]);
+      const normalizedSecret = normalizeSecret(secretMaybe);
+      finalizeLogin(normalizedSecret, pub);
+    } catch (err) {
+      setLoginError((err as Error).message);
+    }
+  };
+
+  const handleDevSecret = () => {
+    const secret = randomHex();
+    const pub = getPublicKey(hexToBytes(secret));
+    finalizeLogin(secret, pub);
+  };
+
+  const handleManualSecret = (secret: string) => {
+    try {
+      const normalized = normalizeSecret(secret);
+      const pub = getPublicKey(hexToBytes(normalized));
+      finalizeLogin(normalized, pub);
+    } catch (err) {
+      setLoginError((err as Error).message);
+    }
+  };
+
+  const handleCreateSubmit = (event: Event) => {
+    event.preventDefault();
+    setCreateError('');
+    try {
+      const peer = normalizeHex(inviteePub(), 'Invitee pubkey');
+      setInviteePub(peer);
+      const session = crypto.randomUUID().replace(/-/g, '');
+      setSessionId(session);
+      const invitePayload = { session, relay: relayUrl(), nostr: nostrUrl() };
+      const encoded = encodeURIComponent(JSON.stringify(invitePayload));
+      const link = `${window.location.origin}${window.location.pathname}?invite=${encoded}`;
+      setInviteLink(link);
+      setStep('invite');
+    } catch (err) {
+      setCreateError((err as Error).message);
+    }
+  };
+
+  const handleJoinSubmit = (event: Event) => {
+    event.preventDefault();
+    setJoinError('');
+    const parsed = parseInvite(joinCode());
+    if (!parsed) {
+      setJoinError('Invite link not valid');
+      return;
+    }
+    setRelayUrl(parsed.relay);
+    setNostrUrl(parsed.nostr);
+    setSessionId(parsed.session);
+    const session: ChatSession = {
+      role: 'bob',
+      relay: parsed.relay,
+      nostr: parsed.nostr,
+      sessionId: parsed.session,
+      secretHex: secretHex(),
+    };
+    persistSession(session);
+    props.onComplete({ session });
+  };
+
+  const enterChat = () => {
+    const session: ChatSession = {
+      role: 'alice',
+      relay: relayUrl(),
+      nostr: nostrUrl(),
+      sessionId: sessionId(),
+      secretHex: secretHex(),
+      inviteePubkey: inviteePub(),
+    };
+    persistSession(session);
+    props.onComplete({ session });
+  };
+
+  return (
+    <section class="onboarding">
+      <header class="onboarding__header">
+        <h1>Marmot Chat</h1>
+        <p class="tagline">Secure MLS chat over Nostr + MoQ</p>
+      </header>
+
+      <Switch fallback={null}>
+        <Match when={step() === 'login'}>
+          <section class="card">
+            <h2>Step 1 · Connect Nostr</h2>
+            <p>Use a NIP-07 browser extension to continue, or supply a developer key.</p>
+            <div class="actions">
+              <button type="button" onClick={handleWalletConnect} data-testid="connect-nip07">
+                Connect Wallet
+              </button>
+              <button type="button" class="ghost" onClick={handleDevSecret} data-testid="use-dev-secret">
+                Use developer key
+              </button>
+            </div>
+            <Show when={loginError()}>
+              {(err) => <div class="login-status error">{err()}</div>}
+            </Show>
+           <div class="manual-secret">
+             <label for="manual-secret-input">Paste a 64-character hex secret key</label>
+              <input
+                id="manual-secret-input"
+                data-testid="manual-secret-input"
+                ref={manualSecretInputRef}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleManualSecret(manualSecretInputRef?.value ?? '');
+                  }
+                }}
+              />
+              <button
+                type="button"
+                data-testid="manual-secret-continue"
+                onClick={() => handleManualSecret(manualSecretInputRef?.value ?? '')}
+              >
+                Continue with secret
+              </button>
+            </div>
+          </section>
+        </Match>
+
+        <Match when={step() === 'mode'}>
+          <section class="card">
+            <h2>Step 2 · Start chatting</h2>
+            <p>Logged in as {shortenKey(pubkey())}</p>
+            <div class="actions">
+              <button type="button" data-testid="start-create" onClick={() => setStep('create')}>
+                Create new chat
+              </button>
+              <button type="button" class="ghost" data-testid="start-join" onClick={() => setStep('join')}>
+                Join invite
+              </button>
+            </div>
+          </section>
+        </Match>
+
+        <Match when={step() === 'create'}>
+          <section class="card">
+            <h2>Create chat</h2>
+            <form onSubmit={handleCreateSubmit}>
+              <label for="create-peer">Invitee pubkey</label>
+              <input
+                id="create-peer"
+                data-testid="create-peer"
+                value={inviteePub()}
+                onInput={(event) => setInviteePub(event.currentTarget.value.trim())}
+              />
+
+              <label for="create-relay">MoQ relay URL</label>
+              <input
+                id="create-relay"
+                data-testid="create-relay"
+                value={relayUrl()}
+                onInput={(event) => setRelayUrl(event.currentTarget.value)}
+              />
+
+              <label for="create-nostr">Nostr relay URL</label>
+              <input
+                id="create-nostr"
+                data-testid="create-nostr"
+                value={nostrUrl()}
+                onInput={(event) => setNostrUrl(event.currentTarget.value)}
+              />
+
+              <p class="hint">An invite link will be generated after you create the group.</p>
+              <Show when={createError()}>{(err) => <div class="form-error">{err()}</div>}</Show>
+              <div class="actions">
+                <button type="submit" data-testid="create-submit">
+                  Create chat
+                </button>
+                <button type="button" class="ghost" id="create-cancel" onClick={() => setStep('mode')}>
+                  Back
+                </button>
+              </div>
+            </form>
+          </section>
+        </Match>
+
+        <Match when={step() === 'invite'}>
+          <section class="card">
+            <h2>Invite link</h2>
+            <p>Share this link with the invited participant.</p>
+            <textarea id="invite-link" readonly value={inviteLink()} data-testid="invite-link" />
+            <div class="actions">
+              <button
+                type="button"
+                id="copy-invite"
+                data-testid="copy-invite"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(inviteLink());
+                  } catch (err) {
+                    console.warn('Failed to copy invite link', err);
+                  }
+                }}
+              >
+                Copy link
+              </button>
+              <button type="button" id="enter-chat" data-testid="enter-chat" onClick={enterChat}>
+                Enter chat
+              </button>
+            </div>
+          </section>
+        </Match>
+
+        <Match when={step() === 'join'}>
+          <section class="card">
+            <h2>Join chat</h2>
+            <form onSubmit={handleJoinSubmit}>
+              <label for="join-code">Paste invite link or code</label>
+              <textarea
+                id="join-code"
+                value={joinCode()}
+                onInput={(event) => setJoinCode(event.currentTarget.value)}
+                data-testid="join-code"
+              />
+
+              <label for="join-relay">MoQ relay URL</label>
+              <input
+                id="join-relay"
+                value={relayUrl()}
+                onInput={(event) => setRelayUrl(event.currentTarget.value)}
+                data-testid="join-relay"
+              />
+
+              <label for="join-nostr">Nostr relay URL</label>
+              <input
+                id="join-nostr"
+                value={nostrUrl()}
+                onInput={(event) => setNostrUrl(event.currentTarget.value)}
+                data-testid="join-nostr"
+              />
+
+              <Show when={joinError()}>{(err) => <div class="form-error">{err()}</div>}</Show>
+              <div class="actions">
+                <button type="submit" data-testid="join-submit">
+                  Join chat
+                </button>
+                <button type="button" class="ghost" id="join-cancel" onClick={() => setStep('mode')}>
+                  Back
+                </button>
+              </div>
+            </form>
+          </section>
+        </Match>
+      </Switch>
+    </section>
+  );
+}
