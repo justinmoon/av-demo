@@ -1,4 +1,5 @@
 pub mod events;
+pub mod local_transport;
 pub mod services;
 mod state;
 
@@ -82,27 +83,11 @@ impl ChatRuntime {
     fn handle_operation(&mut self, operation: Operation) {
         match operation {
             Operation::Start => {
-                let stub_config = {
-                    let state = self.state.borrow();
-                    state.session.stub.clone()
-                };
                 let listener: Box<dyn HandshakeListener> = Box::new(ControllerHandshakeListener {
                     op_tx: self.op_tx.clone(),
                 });
                 if let Err(err) = self.state.borrow_mut().on_start(&self.op_tx, listener) {
                     self.emit_error(err);
-                }
-                if let Some(stub) = stub_config {
-                    if let Some(bundle) = stub.key_package_bundle {
-                        if let Err(err) = self
-                            .state
-                            .borrow()
-                            .identity
-                            .import_key_package_bundle(&bundle)
-                        {
-                            log::warn!("stub import key package bundle failed: {err:#}");
-                        }
-                    }
                 }
             }
             Operation::OutgoingHandshake(message) => {

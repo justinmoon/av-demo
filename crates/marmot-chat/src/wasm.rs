@@ -17,8 +17,9 @@ use serde::{Deserialize, Serialize};
 use web_sys::{BinaryType, ErrorEvent, MessageEvent, WebSocket};
 
 use crate::controller::events::{ChatEvent, SessionParams, SessionRole};
+use crate::controller::local_transport;
 use crate::controller::services::{
-    stub, HandshakeConnectParams, HandshakeListener, HandshakeMessage, HandshakeMessageBody,
+    HandshakeConnectParams, HandshakeListener, HandshakeMessage, HandshakeMessageBody,
     HandshakeMessageType, IdentityService, MoqListener, MoqService, NostrService,
 };
 use crate::controller::{ChatController, ControllerConfig};
@@ -44,6 +45,7 @@ struct JsErrorPayload {
 
 #[wasm_bindgen(start)]
 pub fn wasm_start() {
+    let _ = console_log::init_with_level(log::Level::Debug);
     #[cfg(feature = "panic-hook")]
     set_once();
 }
@@ -121,8 +123,9 @@ fn js_error<E: ToString>(err: E) -> JsValue {
 fn build_services(
     params: &SessionParams,
 ) -> Result<(Rc<dyn NostrService>, Rc<dyn MoqService>), JsValue> {
-    if params.stub.is_some() {
-        Ok(stub::make_stub_services(params))
+    if let Some(id) = &params.local_transport_id {
+        let (nostr, moq) = local_transport::connect_services(id);
+        Ok((nostr, moq))
     } else {
         Ok((Rc::new(JsNostrService::new()), Rc::new(JsMoqService::new())))
     }
@@ -463,11 +466,15 @@ fn handshake_payload(session: &str, role: SessionRole, message: &HandshakeMessag
         HandshakeMessageBody::Welcome {
             welcome,
             group_id_hex,
+            recipient,
         } => {
             if let Some(obj) = base.as_object_mut() {
                 obj.insert("welcome".to_string(), json!(welcome));
                 if let Some(group) = group_id_hex {
                     obj.insert("groupIdHex".to_string(), json!(group));
+                }
+                if let Some(recipient) = recipient {
+                    obj.insert("recipient".to_string(), json!(recipient));
                 }
             }
         }
@@ -509,9 +516,14 @@ fn handshake_from_payload(payload: &JsonValue) -> Option<HandshakeMessage> {
                 .get("groupIdHex")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let recipient = payload
+                .get("recipient")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             HandshakeMessageBody::Welcome {
                 welcome,
                 group_id_hex,
+                recipient,
             }
         }
     };

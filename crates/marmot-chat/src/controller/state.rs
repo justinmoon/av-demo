@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use anyhow::{anyhow, Context, Result};
 use futures::channel::mpsc::UnboundedSender;
+use log::{debug, info, warn};
 
 use crate::controller::events::{
     ChatEvent, HandshakePhase, MemberInfo, SessionParams, SessionRole,
@@ -250,12 +251,35 @@ impl ControllerState {
             crate::controller::services::WrapperOutcome::Commit => {
                 self.identity.merge_pending_commit()?;
                 self.commits += 1;
+                self.sync_members_from_identity()?;
                 Ok(vec![ChatEvent::Commit {
                     total: self.commits,
                 }])
             }
             crate::controller::services::WrapperOutcome::None => Ok(Vec::new()),
         }
+    }
+
+    fn sync_members_from_identity(&mut self) -> Result<()> {
+        let members = match self.identity.list_members() {
+            Ok(list) => list,
+            Err(err) => {
+                warn!("sync_members_from_identity failed: {err:#}");
+                return Ok(());
+            }
+        };
+        let mut updated = false;
+        for pubkey in members {
+            let entry = self.ensure_member(&pubkey);
+            if !entry.joined {
+                entry.joined = true;
+                updated = true;
+            }
+        }
+        if updated {
+            self.emit_roster();
+        }
+        Ok(())
     }
 
     pub fn handle_outgoing_message(&mut self, content: &str) -> Result<(Vec<u8>, ChatEvent)> {
@@ -321,6 +345,14 @@ impl ControllerState {
             return Err(anyhow!("pubkey required"));
         }
 
+        info!(
+            "controller: request_invite start pubkey_input={} is_admin={} ready={} handshake_state={:?}",
+            trimmed,
+            is_admin,
+            self.ready,
+            self.handshake
+        );
+
         let parsed_pk = PublicKey::from_hex(trimmed)
             .or_else(|_| PublicKey::from_bech32(trimmed))
             .context("parse invite pubkey")?;
@@ -336,16 +368,29 @@ impl ControllerState {
             .map(|member| member.joined)
             .unwrap_or(false)
         {
+            info!(
+                "controller: request_invite abort pubkey={} already joined",
+                pubkey
+            );
             return Err(anyhow!("member already present"));
         }
 
         if self.pending_invites.contains_key(&pubkey) {
+            info!(
+                "controller: request_invite abort pubkey={} already pending",
+                pubkey
+            );
             return Err(anyhow!("invite already pending"));
         }
 
         self.peer_pubkeys.insert(pubkey.clone());
         self.pending_invites
             .insert(pubkey.clone(), PendingInvite { is_admin });
+
+        debug!(
+            "controller: request_invite pending_invites now {:?}",
+            self.pending_invites.keys().collect::<Vec<_>>()
+        );
 
         if is_admin {
             self.update_member_admin(&pubkey, true);
@@ -369,6 +414,13 @@ impl ControllerState {
             }),
         );
 
+        info!(
+            "controller: request_invite queued handshake pubkey={} is_admin={} pending_invites={}",
+            pubkey,
+            is_admin,
+            self.pending_invites.len()
+        );
+
         Ok(())
     }
 
@@ -379,6 +431,15 @@ impl ControllerState {
         event_json: String,
         _bundle: Option<String>,
     ) -> Result<()> {
+        info!(
+            "controller: handle_member_addition pubkey={} pending_admin={} handshake_state={:?}",
+            invitee_pub,
+            self.pending_invites
+                .get(&invitee_pub)
+                .map(|invite| invite.is_admin)
+                .unwrap_or(false),
+            self.handshake
+        );
         let requested_admin = self
             .pending_invites
             .remove(&invitee_pub)
@@ -397,6 +458,13 @@ impl ControllerState {
             .add_members(&[event_json.clone()])
             .map_err(|err| anyhow!("add members failed: {err}"))?;
 
+        info!(
+            "controller: add_members produced commit_bytes={} welcomes={} total_members={}",
+            artifacts.commit.bytes.len(),
+            artifacts.welcomes.len(),
+            self.members.len()
+        );
+
         self.commits += 1;
 
         schedule(
@@ -413,6 +481,7 @@ impl ControllerState {
                     data: HandshakeMessageBody::Welcome {
                         welcome: welcome.welcome.clone(),
                         group_id_hex: Some(group_hex.clone()),
+                        recipient: Some(welcome.recipient.clone()),
                     },
                 }),
             );
@@ -424,6 +493,9 @@ impl ControllerState {
         }
 
         self.emit_status(format!("Sent welcome to {}", short_key(&invitee_pub)));
+        info!("controller: welcome dispatched to {}", invitee_pub);
+
+        self.mark_member_joined(&invitee_pub);
 
         Ok(())
     }
@@ -459,38 +531,10 @@ impl ControllerState {
             }
             SessionRole::Invitee => {
                 self.emit_status("Generating key package…");
-                let export = if let Some(stub) = self.session.stub.clone() {
-                    if let Some(event) = stub.key_package_event {
-                        let bundle = stub.key_package_bundle.unwrap_or_default();
-                        let export = KeyPackageExport {
-                            event_json: event,
-                            bundle,
-                        };
-                        self.key_package_cache = Some(export.clone());
-                        export
-                    } else {
-                        let relays = vec![relay_relays_url(&self.session.relay_url)];
-                        let export = self.identity.create_key_package(&relays)?;
-                        self.key_package_cache = Some(export.clone());
-                        export
-                    }
-                } else {
-                    let relays = vec![relay_relays_url(&self.session.relay_url)];
-                    let export = self.identity.create_key_package(&relays)?;
-                    self.key_package_cache = Some(export.clone());
-                    export
-                };
-                schedule(
-                    tx,
-                    Operation::OutgoingHandshake(HandshakeMessage {
-                        message_type: HandshakeMessageType::KeyPackage,
-                        data: HandshakeMessageBody::KeyPackage {
-                            event: export.event_json,
-                            bundle: Some(export.bundle.clone()),
-                            pubkey: Some(self.identity.public_key_hex()),
-                        },
-                    }),
-                );
+                let relays = vec![relay_relays_url(&self.session.relay_url)];
+                let export = self.identity.create_key_package(&relays)?;
+                self.key_package_cache = Some(export);
+                self.emit_handshake_phase(HandshakePhase::WaitingForWelcome);
             }
         }
 
@@ -558,6 +602,7 @@ impl ControllerState {
                         data: HandshakeMessageBody::Welcome {
                             welcome: welcome.clone(),
                             group_id_hex: Some(group_id_hex.clone()),
+                            recipient: Some(invitee_pub.clone()),
                         },
                     }),
                 );
@@ -569,6 +614,10 @@ impl ControllerState {
                 Ok(())
             }
             HandshakeMessageType::RequestWelcome => {
+                let target_pub = match message.data.clone() {
+                    HandshakeMessageBody::Request { pubkey, .. } => pubkey,
+                    _ => None,
+                };
                 if let Some(welcome) = self.welcome_json.clone() {
                     let group_id_hex = self.identity.group_id_hex().unwrap_or_default();
                     schedule(
@@ -578,6 +627,7 @@ impl ControllerState {
                             data: HandshakeMessageBody::Welcome {
                                 welcome,
                                 group_id_hex: Some(group_id_hex),
+                                recipient: target_pub,
                             },
                         }),
                     );
@@ -599,7 +649,15 @@ impl ControllerState {
                     HandshakeMessageBody::Welcome {
                         welcome,
                         group_id_hex,
-                    } => (welcome, group_id_hex),
+                        recipient,
+                    } => {
+                        if let Some(recipient) = recipient {
+                            if recipient != self.identity.public_key_hex() {
+                                return Ok(());
+                            }
+                        }
+                        (welcome, group_id_hex)
+                    }
                     _ => return Err(anyhow!("missing welcome payload")),
                 };
                 if let Some(export) = self.key_package_cache.clone() {
@@ -641,6 +699,15 @@ impl ControllerState {
                 Ok(())
             }
             HandshakeMessageType::RequestKeyPackage => {
+                let target_pub = match message.data.clone() {
+                    HandshakeMessageBody::Request { pubkey, .. } => pubkey,
+                    _ => None,
+                };
+                if let Some(target) = target_pub {
+                    if target != self.identity.public_key_hex() {
+                        return Ok(());
+                    }
+                }
                 if let Some(export) = self.key_package_cache.clone() {
                     schedule(
                         tx,
@@ -701,117 +768,4 @@ fn relay_relays_url(url: &str) -> String {
             format!("{scheme}://{}", parsed.host_str().unwrap_or("localhost"))
         })
         .unwrap_or_else(|_| "wss://localhost".to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use super::*;
-    use crate::controller::events::{ChatEvent, StubConfig};
-    use crate::controller::services::{stub, IdentityService};
-    use crate::messages::{WrapperFrame, WrapperKind};
-
-    mod scenario {
-        use super::WrapperFrame;
-        use super::WrapperKind;
-
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/scenario.rs"
-        ));
-    }
-    use scenario::DeterministicScenario;
-
-    #[test]
-    fn ingest_backlog_matches_expected_messages() {
-        let mut scenario = DeterministicScenario::new().expect("deterministic scenario");
-        let config = scenario.config.clone();
-
-        let wrappers = scenario
-            .conversation
-            .initial_backlog()
-            .expect("initial backlog");
-
-        let session = SessionParams {
-            bootstrap_role: SessionRole::Invitee,
-            relay_url: "stub://relay".to_string(),
-            nostr_url: "stub://nostr".to_string(),
-            session_id: "test-session".to_string(),
-            secret_hex: config.invitee_secret_hex.clone(),
-            peer_pubkeys: vec![config.creator_pubkey.clone()],
-            group_id_hex: Some(config.group_id_hex.clone()),
-            admin_pubkeys: Vec::new(),
-            stub: Some(StubConfig::default()),
-        };
-
-        let identity = IdentityService::create(&session.secret_hex).expect("identity");
-        identity
-            .import_key_package_bundle(&config.invitee_key_package.bundle)
-            .expect("import bundle");
-        let accepted_group = identity
-            .accept_welcome(&config.welcome_json)
-            .expect("accept welcome");
-        assert_eq!(accepted_group, config.group_id_hex);
-
-        let (nostr, moq) = stub::make_stub_services(&session);
-
-        let captured = Rc::new(RefCell::new(Vec::<ChatEvent>::new()));
-        let callback = {
-            let captured = captured.clone();
-            Rc::new(move |event: ChatEvent| {
-                captured.borrow_mut().push(event);
-            }) as Rc<dyn Fn(ChatEvent)>
-        };
-
-        let config = ControllerConfig {
-            identity,
-            session,
-            nostr,
-            moq,
-            callback,
-        };
-
-        let mut state = ControllerState::new(config);
-
-        let mut ordered_events = Vec::new();
-        for wrapper in &wrappers {
-            let events = state
-                .handle_incoming_frame(wrapper.bytes.clone())
-                .expect("ingest frame");
-            ordered_events.extend(events);
-        }
-
-        let expected_messages: Vec<_> = wrappers
-            .iter()
-            .filter_map(|wrapper| match &wrapper.kind {
-                WrapperKind::Application { content, .. } => Some(content.clone()),
-                WrapperKind::Commit => None,
-            })
-            .collect();
-
-        let observed_messages: Vec<_> = ordered_events
-            .iter()
-            .filter_map(|event| match event {
-                ChatEvent::Message { content, .. } => Some(content.clone()),
-                _ => None,
-            })
-            .collect();
-
-        assert_eq!(
-            observed_messages, expected_messages,
-            "message order mismatch"
-        );
-
-        let commit_events = ordered_events
-            .iter()
-            .filter(|event| matches!(event, ChatEvent::Commit { .. }))
-            .count();
-        let expected_commits = wrappers
-            .iter()
-            .filter(|wrapper| matches!(wrapper.kind, WrapperKind::Commit))
-            .count();
-        assert_eq!(commit_events, expected_commits, "commit count mismatch");
-    }
 }

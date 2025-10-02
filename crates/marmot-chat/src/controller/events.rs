@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionRole {
     Initial,
@@ -45,29 +45,7 @@ pub struct SessionParams {
     #[serde(default)]
     pub admin_pubkeys: Vec<String>,
     #[serde(default)]
-    pub stub: Option<StubConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct StubConfig {
-    #[serde(default)]
-    pub backlog: Vec<StubWrapper>,
-    #[serde(default)]
-    pub welcome: Option<String>,
-    #[serde(default)]
-    pub key_package_bundle: Option<String>,
-    #[serde(default)]
-    pub key_package_event: Option<String>,
-    #[serde(default)]
-    pub group_id_hex: Option<String>,
-    #[serde(default)]
-    pub pause_after_frames: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StubWrapper {
-    pub bytes: Vec<u8>,
-    pub label: String,
+    pub local_transport_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::messages::{WrapperFrame, WrapperKind};
 
-use super::events::{SessionParams, SessionRole};
+use super::events::SessionRole;
 
 const DEFAULT_IMAGE_HASH: Option<[u8; 32]> = None;
 const DEFAULT_IMAGE_KEY: Option<[u8; 32]> = None;
@@ -219,15 +219,13 @@ impl IdentityHandle {
     }
 
     pub fn accept_welcome(&self, welcome_json: &str) -> Result<String> {
-        use nostr::UnsignedEvent;
+        use nostr::{EventId, UnsignedEvent};
 
-        let mut welcome_unsigned = UnsignedEvent::from_json(welcome_json.as_bytes())
+        let welcome_unsigned = UnsignedEvent::from_json(welcome_json.as_bytes())
             .context("parse welcome unsigned event")?;
 
-        let welcome_id = welcome_unsigned.id();
-
         self.mdk
-            .process_welcome(&welcome_id, &welcome_unsigned)
+            .process_welcome(&EventId::all_zeros(), &welcome_unsigned)
             .context("process welcome")?;
 
         let mut accepted_group: Option<Group> = None;
@@ -275,6 +273,12 @@ impl IdentityHandle {
         self.mdk
             .merge_pending_commit(&group_id)
             .context("merge pending commit")
+    }
+
+    pub fn list_members(&self) -> Result<Vec<String>> {
+        let group_id = self.group_id()?;
+        let members = self.mdk.get_members(&group_id).context("get members")?;
+        Ok(members.into_iter().map(|pk| pk.to_hex()).collect())
     }
 
     pub fn create_message(&self, content: &str) -> Result<WrapperFrame> {
@@ -420,6 +424,7 @@ pub enum HandshakeMessageBody {
     Welcome {
         welcome: String,
         group_id_hex: Option<String>,
+        recipient: Option<String>,
     },
 }
 
@@ -441,146 +446,4 @@ pub trait MoqService {
     );
     fn publish_wrapper(&self, bytes: &[u8]);
     fn shutdown(&self);
-}
-
-pub mod stub {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use super::*;
-    use crate::controller::events::StubConfig;
-
-    pub fn make_stub_services(
-        session: &SessionParams,
-    ) -> (Rc<dyn NostrService>, Rc<dyn MoqService>) {
-        let stub = session.stub.clone().unwrap_or_default();
-        let nostr = Rc::new(StubNostrService::new(session.bootstrap_role, stub.clone()));
-        let moq = Rc::new(StubMoqService::new(stub));
-        (nostr, moq)
-    }
-
-    struct StubNostrService {
-        role: SessionRole,
-        stub: StubConfig,
-        listener: RefCell<Option<Box<dyn HandshakeListener>>>,
-    }
-
-    impl StubNostrService {
-        fn new(role: SessionRole, stub: StubConfig) -> Self {
-            Self {
-                role,
-                stub,
-                listener: RefCell::new(None),
-            }
-        }
-
-        fn dispatch(&self, message: HandshakeMessage) {
-            if let Some(listener) = self.listener.borrow().as_ref() {
-                listener.on_message(message);
-            }
-        }
-
-        fn emit_key_package(&self) {
-            if let Some(event) = self.stub.key_package_event.clone() {
-                let bundle = self.stub.key_package_bundle.clone();
-                self.dispatch(HandshakeMessage {
-                    message_type: HandshakeMessageType::KeyPackage,
-                    data: HandshakeMessageBody::KeyPackage {
-                        event,
-                        bundle,
-                        pubkey: None,
-                    },
-                });
-            }
-        }
-
-        fn emit_welcome(&self) {
-            if let Some(welcome) = self.stub.welcome.clone() {
-                self.dispatch(HandshakeMessage {
-                    message_type: HandshakeMessageType::Welcome,
-                    data: HandshakeMessageBody::Welcome {
-                        welcome,
-                        group_id_hex: self.stub.group_id_hex.clone(),
-                    },
-                });
-            }
-        }
-    }
-
-    impl NostrService for StubNostrService {
-        fn connect(&self, _params: HandshakeConnectParams, listener: Box<dyn HandshakeListener>) {
-            *self.listener.borrow_mut() = Some(listener);
-            match self.role {
-                SessionRole::Invitee => {
-                    self.emit_key_package();
-                    self.emit_welcome();
-                }
-                SessionRole::Initial => {}
-            }
-        }
-
-        fn send(&self, payload: HandshakeMessage) {
-            match payload.message_type {
-                HandshakeMessageType::RequestKeyPackage => self.emit_key_package(),
-                HandshakeMessageType::RequestWelcome => self.emit_welcome(),
-                _ => {}
-            }
-        }
-
-        fn shutdown(&self) {
-            self.listener.borrow_mut().take();
-        }
-    }
-
-    struct StubMoqService {
-        stub: StubConfig,
-        listener: RefCell<Option<Box<dyn MoqListener>>>,
-    }
-
-    impl StubMoqService {
-        fn new(stub: StubConfig) -> Self {
-            Self {
-                stub,
-                listener: RefCell::new(None),
-            }
-        }
-
-        fn dispatch_ready(&self) {
-            if let Some(listener) = self.listener.borrow().as_ref() {
-                listener.on_ready();
-            }
-        }
-
-        fn dispatch_backlog(&self) {
-            if self.stub.backlog.is_empty() {
-                return;
-            }
-            if let Some(listener) = self.listener.borrow().as_ref() {
-                for frame in &self.stub.backlog {
-                    listener.on_frame(frame.bytes.clone());
-                }
-            }
-        }
-    }
-
-    impl MoqService for StubMoqService {
-        fn connect(
-            &self,
-            _url: &str,
-            _session: &str,
-            _role: SessionRole,
-            _peer_role: SessionRole,
-            listener: Box<dyn MoqListener>,
-        ) {
-            *self.listener.borrow_mut() = Some(listener);
-            self.dispatch_ready();
-            self.dispatch_backlog();
-        }
-
-        fn publish_wrapper(&self, _bytes: &[u8]) {}
-
-        fn shutdown(&self) {
-            self.listener.borrow_mut().take();
-        }
-    }
 }

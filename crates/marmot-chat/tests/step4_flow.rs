@@ -1,315 +1,299 @@
 #![cfg(target_arch = "wasm32")]
 
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::rc::Rc;
 
-use marmot_chat::controller::events::{
-    ChatEvent, SessionParams, SessionRole, StubConfig, StubWrapper,
-};
+use gloo_timers::future::TimeoutFuture;
+use marmot_chat::controller::events::{ChatEvent, SessionParams, SessionRole};
 use marmot_chat::controller::services::IdentityService;
-use marmot_chat::messages::{WrapperFrame, WrapperKind};
+use marmot_chat::WasmChatController;
+use serde_wasm_bindgen as swb;
+use wasm_bindgen::JsValue;
+use wasm_bindgen_test::*;
 
 #[path = "support/mod.rs"]
 mod support;
 
-use marmot_chat::WasmChatController;
-use support::scenario::{DeterministicScenario, CREATOR_SECRET, INVITEE_SECRET};
-use wasm_bindgen::closure::Closure;
-use wasm_bindgen::JsValue;
-use wasm_bindgen_test::*;
-
-use anyhow::{anyhow, Result};
-use gloo_timers::future::TimeoutFuture;
-use serde_wasm_bindgen as swb;
+use support::scenario::{CREATOR_SECRET, INVITEE_SECRET};
 
 const THIRD_SECRET: &str = "9c4e9aba1e3ff5deaa1bcb2a7dce1f2f4a5c6d7e8f9a0b1c2d3e4f5061728394";
-const RELAY_ENDPOINT: &str = "wss://relay.example.com";
-const RELAY_STUB_URL: &str = "stub://relay";
-const NOSTR_STUB_URL: &str = "stub://nostr";
-
-struct ThreeMemberFixture {
-    session: SessionParams,
-    expected_messages: Vec<String>,
-    expected_commits: usize,
-    member_pubkeys: Vec<String>,
-    admin_pubkeys: Vec<String>,
-    new_member_pubkey: String,
-}
-
-impl ThreeMemberFixture {
-    fn build() -> Result<Self> {
-        let relays = vec![RELAY_ENDPOINT.to_string()];
-
-        let alice = IdentityService::create(CREATOR_SECRET)?;
-        let bob = IdentityService::create(INVITEE_SECRET)?;
-        let carol = IdentityService::create(THIRD_SECRET)?;
-
-        let alice_pub = alice.public_key_hex();
-        let bob_pub = bob.public_key_hex();
-        let carol_pub = carol.public_key_hex();
-
-        let bob_export = bob.create_key_package(&relays)?;
-        let group_artifacts =
-            alice.create_group(&bob_export.event_json, &bob_pub, &[alice_pub.clone()])?;
-
-        bob.import_key_package_bundle(&bob_export.bundle)?;
-        let group_id_hex = bob.accept_welcome(&group_artifacts.welcome)?;
-
-        let alice_msg1 = alice.create_message("Alice → Bob: before Carol joins")?;
-        let alice_msg2 = alice.create_message("Alice: prepping to add Carol")?;
-
-        let carol_export = carol.create_key_package(&relays)?;
-        let add_artifacts = alice.add_members(&[carol_export.event_json.clone()])?;
-
-        let welcome = add_artifacts
-            .welcomes
-            .first()
-            .ok_or_else(|| anyhow!("missing welcome for new member"))?;
-
-        carol.import_key_package_bundle(&carol_export.bundle)?;
-        let carol_group_hex = carol.accept_welcome(&welcome.welcome)?;
-        if carol_group_hex != group_id_hex {
-            return Err(anyhow!("group id mismatch after Carol join"));
-        }
-
-        let carol_msg = carol.create_message("Carol: happy to join!")?;
-        let alice_post = alice.create_message("Alice: welcome Carol")?;
-
-        let frames: Vec<WrapperFrame> = vec![
-            alice_msg1,
-            alice_msg2,
-            add_artifacts.commit.clone(),
-            carol_msg,
-            alice_post,
-        ];
-
-        let stub_backlog: Vec<StubWrapper> = frames.iter().map(stub_wrapper).collect();
-
-        let expected_messages = frames
-            .iter()
-            .filter_map(|frame| match &frame.kind {
-                WrapperKind::Application { content, .. } => Some(content.clone()),
-                WrapperKind::Commit => None,
-            })
-            .collect::<Vec<_>>();
-
-        let expected_commits = frames
-            .iter()
-            .filter(|frame| matches!(frame.kind, WrapperKind::Commit))
-            .count();
-
-        let stub = StubConfig {
-            backlog: stub_backlog,
-            welcome: Some(group_artifacts.welcome.clone()),
-            key_package_bundle: Some(bob_export.bundle.clone()),
-            key_package_event: Some(bob_export.event_json.clone()),
-            group_id_hex: Some(group_artifacts.group_id_hex.clone()),
-            pause_after_frames: None,
-        };
-
-        let session = SessionParams {
-            bootstrap_role: SessionRole::Invitee,
-            relay_url: RELAY_STUB_URL.to_string(),
-            nostr_url: NOSTR_STUB_URL.to_string(),
-            session_id: "three-member".to_string(),
-            secret_hex: INVITEE_SECRET.to_string(),
-            peer_pubkeys: vec![alice_pub.clone(), carol_pub.clone()],
-            group_id_hex: Some(group_artifacts.group_id_hex.clone()),
-            admin_pubkeys: vec![alice_pub.clone()],
-            stub: Some(stub),
-        };
-
-        Ok(Self {
-            session,
-            expected_messages,
-            expected_commits,
-            member_pubkeys: vec![alice_pub.clone(), bob_pub.clone(), carol_pub.clone()],
-            admin_pubkeys: vec![alice_pub],
-            new_member_pubkey: carol_pub,
-        })
-    }
-}
-
-fn stub_wrapper(wrapper: &WrapperFrame) -> StubWrapper {
-    StubWrapper {
-        bytes: wrapper.bytes.clone(),
-        label: wrapper.kind.label().to_string(),
-    }
-}
 
 #[wasm_bindgen_test]
 async fn bob_bootstrap_flow() {
-    let mut scenario = DeterministicScenario::new().expect("deterministic scenario");
-    let config = scenario.config.clone();
-    let backlog_wrappers = scenario
-        .conversation
-        .initial_backlog()
-        .expect("initial backlog wrappers");
+    let session_id = unique_session_id("bob-bootstrap");
+    let transport_id = format!("transport-{session_id}");
+    let relay_url = format!("local://{session_id}/relay");
+    let nostr_url = format!("local://{session_id}/nostr");
 
-    let stub_backlog: Vec<StubWrapper> = backlog_wrappers
-        .iter()
-        .map(|wrapper| StubWrapper {
-            bytes: wrapper.bytes.clone(),
-            label: wrapper.kind.label().to_string(),
-        })
-        .collect();
+    let alice_pub = IdentityService::create(CREATOR_SECRET)
+        .expect("alice identity")
+        .public_key_hex();
+    let bob_pub = IdentityService::create(INVITEE_SECRET)
+        .expect("bob identity")
+        .public_key_hex();
 
-    let stub = StubConfig {
-        backlog: stub_backlog,
-        welcome: Some(config.welcome_json.clone()),
-        key_package_bundle: Some(config.invitee_key_package.bundle.clone()),
-        key_package_event: Some(config.invitee_key_package.event_json.clone()),
-        group_id_hex: Some(config.group_id_hex.clone()),
-        pause_after_frames: None,
+    let alice_session = SessionParams {
+        bootstrap_role: SessionRole::Initial,
+        relay_url: relay_url.clone(),
+        nostr_url: nostr_url.clone(),
+        session_id: session_id.clone(),
+        secret_hex: CREATOR_SECRET.to_string(),
+        peer_pubkeys: vec![bob_pub.clone()],
+        group_id_hex: None,
+        admin_pubkeys: vec![alice_pub.clone()],
+        local_transport_id: Some(transport_id.clone()),
     };
 
-    let session = SessionParams {
+    let bob_session = SessionParams {
         bootstrap_role: SessionRole::Invitee,
-        relay_url: "stub://relay".to_string(),
-        nostr_url: "stub://nostr".to_string(),
-        session_id: "phase4".to_string(),
-        secret_hex: config.invitee_secret_hex.clone(),
-        peer_pubkeys: vec![config.creator_pubkey.clone()],
-        group_id_hex: Some(config.group_id_hex.clone()),
-        admin_pubkeys: Vec::new(),
-        stub: Some(stub),
+        relay_url: relay_url.clone(),
+        nostr_url: nostr_url.clone(),
+        session_id: session_id.clone(),
+        secret_hex: INVITEE_SECRET.to_string(),
+        peer_pubkeys: vec![alice_pub.clone()],
+        group_id_hex: None,
+        admin_pubkeys: vec![alice_pub.clone()],
+        local_transport_id: Some(transport_id.clone()),
     };
 
-    let events = Rc::new(RefCell::new(Vec::<ChatEvent>::new()));
-    let events_ref = events.clone();
-    let callback = Closure::wrap(Box::new(move |value: JsValue| {
-        if let Ok(event) = swb::from_value::<ChatEvent>(value) {
-            events_ref.borrow_mut().push(event);
-        }
-    }) as Box<dyn FnMut(JsValue)>);
+    let (alice, alice_events) = start_controller(alice_session);
+    let (bob, bob_events) = start_controller(bob_session);
 
-    let session_js = swb::to_value(&session).expect("serialize session");
-    let handle = WasmChatController::start(session_js, callback.as_ref().clone())
-        .map_err(|err| err.as_string().unwrap_or_default())
-        .expect("controller start");
-    callback.forget();
+    assert!(
+        wait_until(60, || is_ready(&alice_events) && is_ready(&bob_events)).await,
+        "bob bootstrap readiness: alice={:?} bob={:?}",
+        alice_events.borrow(),
+        bob_events.borrow()
+    );
 
-    TimeoutFuture::new(50).await;
-
-    handle.shutdown();
-
-    let recorded = events.borrow();
-    let messages: Vec<_> = recorded
-        .iter()
-        .filter_map(|event| match event {
-            ChatEvent::Message { content, .. } => Some(content.clone()),
-            _ => None,
+    alice.send_message("alice → bob #1".to_string());
+    assert!(
+        wait_until(60, || {
+            has_message(&bob_events, &alice_pub, "alice → bob #1")
         })
-        .collect();
+        .await,
+        "bob did not receive alice message; events={:?}",
+        bob_events.borrow()
+    );
 
-    let expected: Vec<_> = backlog_wrappers
-        .iter()
-        .filter_map(|wrapper| match &wrapper.kind {
-            WrapperKind::Application { content, .. } => Some(content.clone()),
-            WrapperKind::Commit => None,
+    bob.send_message("bob → alice ack".to_string());
+    assert!(
+        wait_until(60, || {
+            has_message(&alice_events, &bob_pub, "bob → alice ack")
         })
-        .collect();
+        .await,
+        "alice did not receive bob ack; events={:?}",
+        alice_events.borrow()
+    );
 
-    assert_eq!(messages, expected, "decrypted backlog mismatch");
+    alice.rotate_epoch();
+    wait_for_commit("alice commit", &alice_events).await;
+    wait_for_commit("bob commit", &bob_events).await;
 
-    let commit_events = recorded
-        .iter()
-        .filter(|event| matches!(event, ChatEvent::Commit { .. }))
-        .count();
-    let expected_commits = backlog_wrappers
-        .iter()
-        .filter(|wrapper| matches!(wrapper.kind, WrapperKind::Commit))
-        .count();
-    assert_eq!(commit_events, expected_commits, "commit count mismatch");
+    alice.shutdown();
+    bob.shutdown();
 }
 
 #[wasm_bindgen_test]
-async fn three_member_backlog_flow() {
-    let fixture = ThreeMemberFixture::build().expect("three member fixture");
+async fn three_member_invite_flow() {
+    let session_id = unique_session_id("three-member");
+    let transport_id = format!("transport-{session_id}");
+    let relay_url = format!("local://{session_id}/relay");
+    let nostr_url = format!("local://{session_id}/nostr");
 
+    let alice_pub = IdentityService::create(CREATOR_SECRET)
+        .expect("alice identity")
+        .public_key_hex();
+    let bob_pub = IdentityService::create(INVITEE_SECRET)
+        .expect("bob identity")
+        .public_key_hex();
+    let carol_pub = IdentityService::create(THIRD_SECRET)
+        .expect("carol identity")
+        .public_key_hex();
+
+    let alice_session = SessionParams {
+        bootstrap_role: SessionRole::Initial,
+        relay_url: relay_url.clone(),
+        nostr_url: nostr_url.clone(),
+        session_id: session_id.clone(),
+        secret_hex: CREATOR_SECRET.to_string(),
+        peer_pubkeys: vec![bob_pub.clone(), carol_pub.clone()],
+        group_id_hex: None,
+        admin_pubkeys: vec![alice_pub.clone()],
+        local_transport_id: Some(transport_id.clone()),
+    };
+
+    let bob_session = SessionParams {
+        bootstrap_role: SessionRole::Invitee,
+        relay_url: relay_url.clone(),
+        nostr_url: nostr_url.clone(),
+        session_id: session_id.clone(),
+        secret_hex: INVITEE_SECRET.to_string(),
+        peer_pubkeys: vec![alice_pub.clone()],
+        group_id_hex: None,
+        admin_pubkeys: vec![alice_pub.clone()],
+        local_transport_id: Some(transport_id.clone()),
+    };
+
+    let carol_session = SessionParams {
+        bootstrap_role: SessionRole::Invitee,
+        relay_url: relay_url.clone(),
+        nostr_url: nostr_url.clone(),
+        session_id: session_id.clone(),
+        secret_hex: THIRD_SECRET.to_string(),
+        peer_pubkeys: vec![alice_pub.clone(), bob_pub.clone()],
+        group_id_hex: None,
+        admin_pubkeys: vec![alice_pub.clone()],
+        local_transport_id: Some(transport_id.clone()),
+    };
+
+    let (alice, alice_events) = start_controller(alice_session);
+    let (bob, bob_events) = start_controller(bob_session);
+
+    assert!(
+        wait_until(60, || is_ready(&alice_events) && is_ready(&bob_events)).await,
+        "alice/bob not ready; alice={:?} bob={:?}",
+        alice_events.borrow(),
+        bob_events.borrow()
+    );
+
+    let (carol, carol_events) = start_controller(carol_session);
+    assert!(
+        wait_until(20, || has_handshake_waiting(&carol_events)).await,
+        "carol did not reach handshake wait; events={:?}",
+        carol_events.borrow()
+    );
+
+    alice.invite_member(carol_pub.clone(), false);
+
+    assert!(
+        wait_until(120, || is_ready(&carol_events)).await,
+        "carol not ready; events={:?}",
+        carol_events.borrow()
+    );
+    assert!(
+        wait_until(120, || roster_contains(&alice_events, &carol_pub)).await,
+        "alice roster missing carol; events={:?}",
+        alice_events.borrow()
+    );
+    assert!(
+        wait_until(120, || roster_contains(&bob_events, &carol_pub)).await,
+        "bob roster missing carol; events={:?}",
+        bob_events.borrow()
+    );
+
+    carol.send_message("carol → everyone".to_string());
+
+    assert!(
+        wait_until(120, || {
+            has_message(&alice_events, &carol_pub, "carol → everyone")
+        })
+        .await,
+        "alice missing carol message; events={:?}",
+        alice_events.borrow()
+    );
+    assert!(
+        wait_until(120, || {
+            has_message(&bob_events, &carol_pub, "carol → everyone")
+        })
+        .await,
+        "bob missing carol message; events={:?}",
+        bob_events.borrow()
+    );
+
+    alice.rotate_epoch();
+    wait_for_commit("alice commit after carol", &alice_events).await;
+    wait_for_commit("bob commit after carol", &bob_events).await;
+
+    alice.shutdown();
+    bob.shutdown();
+    carol.shutdown();
+}
+
+fn start_controller(session: SessionParams) -> (WasmChatController, Rc<RefCell<Vec<ChatEvent>>>) {
     let events = Rc::new(RefCell::new(Vec::<ChatEvent>::new()));
     let events_ref = events.clone();
-    let callback = Closure::wrap(Box::new(move |value: JsValue| {
+    let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move |value: JsValue| {
         if let Ok(event) = swb::from_value::<ChatEvent>(value) {
             events_ref.borrow_mut().push(event);
         }
     }) as Box<dyn FnMut(JsValue)>);
 
-    let session_js = swb::to_value(&fixture.session).expect("serialize session");
-    let handle = WasmChatController::start(session_js, callback.as_ref().clone())
-        .map_err(|err| err.as_string().unwrap_or_default())
-        .expect("controller start");
+    let session_js = swb::to_value(&session).expect("serialize session params");
+    let controller =
+        WasmChatController::start(session_js, callback.as_ref().clone()).expect("start controller");
     callback.forget();
+    (controller, events)
+}
 
-    TimeoutFuture::new(80).await;
-
-    handle.shutdown();
-
-    let recorded = events.borrow();
-
-    let messages: Vec<_> = recorded
+fn is_ready(events: &Rc<RefCell<Vec<ChatEvent>>>) -> bool {
+    events
+        .borrow()
         .iter()
-        .filter_map(|event| match event {
-            ChatEvent::Message { content, .. } => Some(content.clone()),
-            _ => None,
-        })
-        .collect();
+        .any(|event| matches!(event, ChatEvent::Ready { ready: true }))
+}
 
-    assert_eq!(
-        messages, fixture.expected_messages,
-        "decrypted message backlog mismatch"
-    );
+fn has_handshake_waiting(events: &Rc<RefCell<Vec<ChatEvent>>>) -> bool {
+    events.borrow().iter().any(|event| match event {
+        ChatEvent::Handshake { phase } => matches!(
+            phase,
+            marmot_chat::controller::events::HandshakePhase::WaitingForWelcome
+        ),
+        _ => false,
+    })
+}
 
-    let commit_events = recorded
+fn has_message(events: &Rc<RefCell<Vec<ChatEvent>>>, author: &str, content: &str) -> bool {
+    events.borrow().iter().any(|event| match event {
+        ChatEvent::Message {
+            author: evt_author,
+            content: evt_content,
+            ..
+        } => evt_author == author && evt_content == content,
+        _ => false,
+    })
+}
+
+fn has_commit(events: &Rc<RefCell<Vec<ChatEvent>>>) -> bool {
+    events
+        .borrow()
         .iter()
-        .filter(|event| matches!(event, ChatEvent::Commit { .. }))
-        .count();
+        .any(|event| matches!(event, ChatEvent::Commit { .. }))
+}
 
-    assert_eq!(
-        commit_events, fixture.expected_commits,
-        "commit count mismatch"
-    );
+fn roster_contains(events: &Rc<RefCell<Vec<ChatEvent>>>, target: &str) -> bool {
+    events.borrow().iter().any(|event| match event {
+        ChatEvent::Roster { members } => members.iter().any(|member| member.pubkey == target),
+        ChatEvent::MemberJoined { member } => member.pubkey == target,
+        ChatEvent::MemberUpdated { member } => member.pubkey == target,
+        _ => false,
+    })
+}
 
-    let roster_members = recorded
-        .iter()
-        .rev()
-        .find_map(|event| match event {
-            ChatEvent::Roster { members } => Some(members.clone()),
-            _ => None,
-        })
-        .expect("roster event not emitted");
-
-    let roster_pubkeys: HashSet<String> = roster_members
-        .iter()
-        .map(|member| member.pubkey.clone())
-        .collect();
-    let expected_pubkeys: HashSet<String> = fixture.member_pubkeys.iter().cloned().collect();
-    assert_eq!(roster_pubkeys, expected_pubkeys, "roster members mismatch");
-
-    for admin in &fixture.admin_pubkeys {
-        let entry = roster_members
-            .iter()
-            .find(|member| &member.pubkey == admin)
-            .expect("admin missing from roster");
-        assert!(entry.is_admin, "expected admin {} flagged", admin);
+async fn wait_for_commit(label: &str, events: &Rc<RefCell<Vec<ChatEvent>>>) {
+    for _ in 0..120 {
+        if has_commit(events) {
+            return;
+        }
+        TimeoutFuture::new(20).await;
     }
+    panic!("{label} not observed; events={:?}", events.borrow());
+}
 
-    let new_member_entry = roster_members
-        .iter()
-        .find(|member| member.pubkey == fixture.new_member_pubkey)
-        .expect("new member missing from roster");
-    assert!(!new_member_entry.is_admin, "new member should not be admin");
+async fn wait_until<F>(attempts: usize, mut condition: F) -> bool
+where
+    F: FnMut() -> bool,
+{
+    for _ in 0..attempts {
+        if condition() {
+            return true;
+        }
+        TimeoutFuture::new(20).await;
+    }
+    condition()
+}
 
-    let joined_pubkeys: Vec<String> = recorded
-        .iter()
-        .filter_map(|event| match event {
-            ChatEvent::MemberJoined { member } => Some(member.pubkey.clone()),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        joined_pubkeys.contains(&fixture.new_member_pubkey),
-        "missing member joined event for new participant"
-    );
+fn unique_session_id(label: &str) -> String {
+    let random = (js_sys::Math::random() * 1_000_000.0) as u64;
+    format!("{label}-{random}-{}", js_sys::Date::now() as u64)
 }
