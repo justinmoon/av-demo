@@ -21,6 +21,7 @@ export function ChatView(props: ChatViewProps) {
   const [invitePubkey, setInvitePubkey] = createSignal('');
   const [inviteAdmin, setInviteAdmin] = createSignal(false);
   const [inviteError, setInviteError] = createSignal('');
+  const [inviteSuccess, setInviteSuccess] = createSignal('');
 
   let controller: ChatHandle | null = null;
   let runId = 0;
@@ -174,12 +175,14 @@ export function ChatView(props: ChatViewProps) {
   const handleInviteSubmit = async (event: Event) => {
     event.preventDefault();
     if (!controller) return;
+    setInviteError('');
+    setInviteSuccess('');
     try {
       const normalized = normalizeHex(invitePubkey(), 'Pubkey');
       controller.invite(normalized, inviteAdmin());
       setInvitePubkey('');
       setInviteAdmin(false);
-      setInviteError('');
+      setInviteSuccess('Invite sent! Share the original invite link with the new participant.');
     } catch (err) {
       setInviteError((err as Error).message);
     }
@@ -258,6 +261,7 @@ export function ChatView(props: ChatViewProps) {
               Grant admin
             </label>
             <Show when={inviteError()}>{(err) => <div class="form-error">{err()}</div>}</Show>
+            <Show when={inviteSuccess()}>{(msg) => <div class="form-success">{msg()}</div>}</Show>
             <button type="submit" data-testid="invite-submit" disabled={sending()}>
               Request invite
             </button>
