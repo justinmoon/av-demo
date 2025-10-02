@@ -219,13 +219,15 @@ impl IdentityHandle {
     }
 
     pub fn accept_welcome(&self, welcome_json: &str) -> Result<String> {
-        use nostr::{EventId, UnsignedEvent};
+        use nostr::UnsignedEvent;
 
-        let welcome_unsigned = UnsignedEvent::from_json(welcome_json.as_bytes())
+        let mut welcome_unsigned = UnsignedEvent::from_json(welcome_json.as_bytes())
             .context("parse welcome unsigned event")?;
 
+        let welcome_id = welcome_unsigned.id();
+
         self.mdk
-            .process_welcome(&EventId::all_zeros(), &welcome_unsigned)
+            .process_welcome(&welcome_id, &welcome_unsigned)
             .context("process welcome")?;
 
         let mut accepted_group: Option<Group> = None;

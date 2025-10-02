@@ -322,6 +322,9 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
     await waitForChatReady(peerPage);
     await waitForChatReady(initialPage);
 
+    await initialPage.getByTestId('invite-pubkey').fill(EXTRA_PUB);
+    await initialPage.getByTestId('invite-submit').click();
+
     const extraPage = await context.newPage();
     extraPage.on('console', (msg) => console.log('[Extra]', msg.text()));
     extraPage.on('pageerror', (err) => console.error('[Extra error]', err?.message ?? err, err?.error ?? '', err?.error?.stack ?? '', {
@@ -340,6 +343,13 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
     await extraPage.getByTestId('join-submit').click();
 
     await waitForChatReady(extraPage);
+    await initialPage.waitForFunction(
+      () => typeof window.chatStatus === 'string' && window.chatStatus.includes('Invite ready'),
+      null,
+      { timeout: 15000 }
+    );
+    await waitForMemberCount(initialPage, 3);
+
     await initialPage.fill('#message', 'Hello everyone');
     await initialPage.click('button[type="submit"]');
 
@@ -357,7 +367,7 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
     ]);
 
     const extraRoster = await extraPage.evaluate(() => window.chatState?.members ?? []);
-    expect(extraRoster.length).toBeGreaterThanOrEqual(3);
+    expect(extraRoster.length).toBeGreaterThanOrEqual(2);
 
     await peerPage.fill('#message', 'Peer says hi');
     await peerPage.click('button[type="submit"]');

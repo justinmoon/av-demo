@@ -90,6 +90,16 @@ export async function createMoqBridge() {
 
       void acquireTrack();
 
+      const isTransient = (error: unknown) => {
+        const message =
+          typeof error === 'string'
+            ? error
+            : error instanceof Error
+            ? error.message
+            : String(error ?? '');
+        return /reset_stream/i.test(message) || /not found/i.test(message);
+      };
+
       const consumePeer = async () => {
         while (!closed) {
           try {
@@ -101,8 +111,12 @@ export async function createMoqBridge() {
               callbacks.onFrame(frame);
             }
           } catch (err) {
-            console.error('[marmot-moq] consume loop error', err);
-            callbacks.onError(err);
+            if (isTransient(err)) {
+              console.warn('[marmot-moq] transient consume error, retrying', err);
+            } else {
+              console.error('[marmot-moq] consume loop error', err);
+              callbacks.onError(err);
+            }
             await new Promise((resolve) => setTimeout(resolve, 1000));
           }
         }
@@ -115,7 +129,6 @@ export async function createMoqBridge() {
           currentTrack.writeFrame(data);
         } else {
           console.warn('[marmot-moq] publish before track ready');
-          callbacks.onError('Publish track not ready');
         }
       };
 
