@@ -39,8 +39,8 @@ export function Onboarding(props: OnboardingProps) {
   const [pubkey, setPubkey] = createSignal<string>('');
   const [secretHex, setSecretHex] = createSignal<string>('');
   const [loginError, setLoginError] = createSignal<string>('');
-  const [relayUrl, setRelayUrl] = createSignal(props.defaults.relay ?? 'http://127.0.0.1:54943/marmot');
-  const [nostrUrl, setNostrUrl] = createSignal(props.defaults.nostr ?? 'ws://127.0.0.1:7447/');
+  const [relayUrl, setRelayUrl] = createSignal(props.defaults.relay ?? 'http://127.0.0.1:4443/marmot');
+  const [nostrUrl, setNostrUrl] = createSignal(props.defaults.nostr ?? 'ws://127.0.0.1:8880/');
   const [peerPub, setPeerPub] = createSignal('');
   const [inviteLink, setInviteLink] = createSignal('');
   const [sessionId, setSessionId] = createSignal('');
