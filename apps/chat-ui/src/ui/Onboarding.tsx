@@ -74,14 +74,12 @@ export function Onboarding(props: OnboardingProps) {
     try {
       const nostr = (window as any).nostr as Nip07 | undefined;
       if (!nostr) {
-        throw new Error('No NIP-07 wallet found');
+        throw new Error('No NIP-07 extension found. Install Alby, nos2x, or another Nostr signer.');
       }
-      const [pub, secretMaybe] = await Promise.all([
-        nostr.getPublicKey(),
-        nostr.getSecretKey ? nostr.getSecretKey() : Promise.reject(new Error('Wallet refused to share secret key')),
-      ]);
-      const normalizedSecret = normalizeSecret(secretMaybe);
-      finalizeLogin(normalizedSecret, pub);
+      const pub = await nostr.getPublicKey();
+      // Generate ephemeral MLS secret locally (separate from Nostr identity)
+      const mlsSecret = randomHex();
+      finalizeLogin(mlsSecret, pub);
     } catch (err) {
       setLoginError((err as Error).message);
     }
@@ -169,40 +167,19 @@ export function Onboarding(props: OnboardingProps) {
       <Switch fallback={null}>
         <Match when={step() === 'login'}>
           <section class="card">
-            <h2>Step 1 · Connect Nostr</h2>
-            <p>Use a NIP-07 browser extension to continue, or supply a developer key.</p>
+            <h2>Step 1 · Connect Nostr Identity</h2>
+            <p>Connect a NIP-07 browser extension (Alby, nos2x, etc.) or generate a temporary key.</p>
             <div class="actions">
               <button type="button" onClick={handleWalletConnect} data-testid="connect-nip07">
-                Connect Wallet
+                Connect Extension
               </button>
               <button type="button" class="ghost" onClick={handleDevSecret} data-testid="use-dev-secret">
-                Use developer key
+                Generate temp key
               </button>
             </div>
             <Show when={loginError()}>
               {(err) => <div class="login-status error">{err()}</div>}
             </Show>
-           <div class="manual-secret">
-             <label for="manual-secret-input">Paste a 64-character hex secret key</label>
-              <input
-                id="manual-secret-input"
-                data-testid="manual-secret-input"
-                ref={manualSecretInputRef}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    handleManualSecret(manualSecretInputRef?.value ?? '');
-                  }
-                }}
-              />
-              <button
-                type="button"
-                data-testid="manual-secret-continue"
-                onClick={() => handleManualSecret(manualSecretInputRef?.value ?? '')}
-              >
-                Continue with secret
-              </button>
-            </div>
           </section>
         </Match>
 
