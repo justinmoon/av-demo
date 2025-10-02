@@ -8,7 +8,6 @@ import { hexToBytes, normalizeHex } from '../utils';
 
 export interface ChatViewProps {
   session: ChatSession;
-  onReset: () => void;
   startChat: (session: ChatSession, callbacks: ChatCallbacks) => Promise<ChatHandle>;
 }
 
@@ -195,18 +194,6 @@ export function ChatView(props: ChatViewProps) {
           <span id="role">Role: {formatRole(props.session.role)}</span>
           <span id="relay">Relay: {props.session.relay}</span>
           <span id="nostr">Nostr: {props.session.nostr}</span>
-          <button
-            type="button"
-            id="reset-session"
-            class="info__reset"
-            onClick={() => {
-              stopController();
-              props.onReset();
-            }}
-            data-testid="reset-session"
-          >
-            Reset
-          </button>
         </div>
       </header>
 

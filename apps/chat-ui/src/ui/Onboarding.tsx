@@ -6,7 +6,6 @@ import {
   randomHex,
   shortenKey,
   parseInvite,
-  persistSession,
   hexToBytes,
 } from '../utils';
 import type { ChatSession } from '../types';
@@ -139,7 +138,6 @@ export function Onboarding(props: OnboardingProps) {
       adminPubkeys: [],
       peerPubkeys: [],
     };
-    persistSession(session);
     props.onComplete({ session });
   };
 
@@ -153,7 +151,6 @@ export function Onboarding(props: OnboardingProps) {
       adminPubkeys: [pubkey()],
       peerPubkeys: peerPub() ? [peerPub()] : [],
     };
-    persistSession(session);
     props.onComplete({ session });
   };
 
