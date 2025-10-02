@@ -168,8 +168,7 @@ impl IdentityHandle {
             .create_group(&self.keys.public_key(), vec![invitee], config)
             .context("create group")?;
         let welcome = result
-            .welcome_rumors
-            .get(0)
+            .welcome_rumors.first()
             .ok_or_else(|| anyhow!("missing welcome rumor"))?
             .clone();
         let group_id = result.group.mls_group_id.clone();
@@ -307,7 +306,7 @@ impl IdentityHandle {
         let json = evolution_event.as_json();
         let _event = Event::from_json(&json).context("commit event")?;
         let _ = self.ingest_wrapper(json.as_bytes())?;
-        let _ = self.merge_pending_commit()?;
+        self.merge_pending_commit()?;
         Ok(WrapperFrame {
             bytes: json.into_bytes(),
             kind: WrapperKind::Commit,
@@ -398,6 +397,7 @@ impl HandshakeMessageType {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Option<Self> {
         match value {
             "request-key-package" => Some(HandshakeMessageType::RequestKeyPackage),

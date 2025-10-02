@@ -176,9 +176,9 @@ impl ChatRuntime {
 
     fn emit_error(&self, err: anyhow::Error) {
         let message = format!("{err:#}");
-        if let Ok(_) = self
+        if self
             .op_tx
-            .unbounded_send(Operation::Emit(ChatEvent::error(message.clone())))
+            .unbounded_send(Operation::Emit(ChatEvent::error(message.clone()))).is_ok()
         {
             log::error!("controller error: {message}");
         }

@@ -275,4 +275,3 @@ impl Clone for JsMoqService {
         }
     }
 }
-

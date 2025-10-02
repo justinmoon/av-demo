@@ -130,7 +130,7 @@ impl ControllerState {
 
         let artifacts = self
             .identity
-            .add_members(&[event_json.clone()])
+            .add_members(std::slice::from_ref(&event_json))
             .map_err(|err| anyhow!("add members failed: {err}"))?;
 
         info!(
@@ -203,7 +203,7 @@ impl ControllerState {
                     Operation::OutgoingHandshake(HandshakeMessage {
                         message_type: HandshakeMessageType::RequestKeyPackage,
                         data: HandshakeMessageBody::Request {
-                            pubkey: self.session.peer_pubkeys.get(0).cloned(),
+                            pubkey: self.session.peer_pubkeys.first().cloned(),
                             is_admin: None,
                         },
                     }),

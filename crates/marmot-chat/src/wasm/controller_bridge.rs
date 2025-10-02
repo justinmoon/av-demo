@@ -10,9 +10,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 
-use js_sys::{Function, Object, Reflect, Uint8Array};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
+use js_sys::{Function, Object, Reflect, Uint8Array};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serde_wasm_bindgen as swb;
@@ -440,4 +440,3 @@ pub fn create_message(identity_id: u32, payload: JsValue) -> Result<Uint8Array, 
         Ok(Uint8Array::from(wrapper.as_json().as_bytes()))
     })
 }
-

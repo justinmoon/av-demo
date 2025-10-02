@@ -127,4 +127,3 @@ fn build_services(
 ) -> Result<(Rc<dyn NostrService>, Rc<dyn MoqService>), JsValue> {
     Ok((Rc::new(JsNostrService::new()), Rc::new(JsMoqService::new())))
 }
-

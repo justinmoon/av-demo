@@ -1,19 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::Result;
 use futures::channel::mpsc::UnboundedSender;
-use log::{debug, info, warn};
+use log::{info, warn};
 
 use crate::controller::events::{
     ChatEvent, HandshakePhase, MemberInfo, SessionParams, SessionRole,
 };
 use crate::controller::services::{
-    GroupArtifacts, HandshakeConnectParams, HandshakeListener, HandshakeMessage,
-    HandshakeMessageBody, HandshakeMessageType, IdentityHandle, KeyPackageExport, MoqService,
+    HandshakeMessage, IdentityHandle, KeyPackageExport, MoqService,
     NostrService,
 };
-use nostr::{prelude::FromBech32, PublicKey};
 
 use super::utils::{now_timestamp, schedule};
 
