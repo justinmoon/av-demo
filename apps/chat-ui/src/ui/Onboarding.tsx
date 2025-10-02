@@ -186,7 +186,24 @@ export function Onboarding(props: OnboardingProps) {
         <Match when={step() === 'mode'}>
           <section class="card">
             <h2>Step 2 · Start chatting</h2>
-            <p>Logged in as {shortenKey(pubkey())}</p>
+            <div class="pubkey-display">
+              <label>Your pubkey</label>
+              <div class="pubkey-row">
+                <input readonly value={pubkey()} data-testid="mode-pubkey" />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(pubkey());
+                    } catch (err) {
+                      console.warn('Failed to copy pubkey', err);
+                    }
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
             <div class="actions">
               <button type="button" data-testid="start-create" onClick={() => setStep('create')}>
                 Create new chat
@@ -201,13 +218,32 @@ export function Onboarding(props: OnboardingProps) {
         <Match when={step() === 'create'}>
           <section class="card">
             <h2>Create chat</h2>
+            <div class="pubkey-display">
+              <label>Your pubkey (share this with your peer)</label>
+              <div class="pubkey-row">
+                <input readonly value={pubkey()} data-testid="own-pubkey" />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(pubkey());
+                    } catch (err) {
+                      console.warn('Failed to copy pubkey', err);
+                    }
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
             <form onSubmit={handleCreateSubmit}>
-              <label for="create-peer">Peer pubkey</label>
+              <label for="create-peer">Peer pubkey (paste their pubkey here)</label>
               <input
                 id="create-peer"
                 data-testid="create-peer"
                 value={peerPub()}
                 onInput={(event) => setPeerPub(event.currentTarget.value.trim())}
+                placeholder="Paste your peer's pubkey"
               />
 
               <label for="create-relay">MoQ relay URL</label>
