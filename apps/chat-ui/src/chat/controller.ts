@@ -75,6 +75,7 @@ export async function startChat(session: ChatSession, callbacks: ChatCallbacks):
     secret_hex: session.secretHex,
     invitee_pubkey: session.inviteePubkey,
     group_id_hex: session.groupIdHex,
+    admin_pubkeys: session.adminPubkeys ?? [],
   };
 
   const controller = WasmChatController.start(sessionValue, eventHandler);

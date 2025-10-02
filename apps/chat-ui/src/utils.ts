@@ -92,6 +92,12 @@ export function loadSession(): ChatSession | null {
       localStorage.removeItem(SESSION_STORAGE_KEY);
       return null;
     }
+    if (parsed.adminPubkeys && !Array.isArray(parsed.adminPubkeys)) {
+      parsed.adminPubkeys = [];
+    }
+    if (!parsed.adminPubkeys) {
+      parsed.adminPubkeys = [];
+    }
     return parsed;
   } catch (err) {
     console.warn('Failed to load session', err);

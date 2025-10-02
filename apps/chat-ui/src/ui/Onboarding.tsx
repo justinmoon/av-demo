@@ -138,6 +138,7 @@ export function Onboarding(props: OnboardingProps) {
       nostr: parsed.nostr,
       sessionId: parsed.session,
       secretHex: secretHex(),
+      adminPubkeys: [],
     };
     persistSession(session);
     props.onComplete({ session });
@@ -151,6 +152,7 @@ export function Onboarding(props: OnboardingProps) {
       sessionId: sessionId(),
       secretHex: secretHex(),
       inviteePubkey: inviteePub(),
+      adminPubkeys: [pubkey()],
     };
     persistSession(session);
     props.onComplete({ session });

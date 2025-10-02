@@ -281,7 +281,7 @@ impl ControllerState {
                     welcome,
                 } = self
                     .identity
-                    .create_group(&event, &invitee_pub)
+                    .create_group(&event, &invitee_pub, &self.session.admin_pubkeys)
                     .map_err(|err| anyhow!("create_group failed: {err}"))?;
                 self.welcome_json = Some(welcome.clone());
                 self.emit_status("Group created; sending welcome…");
@@ -425,7 +425,18 @@ mod tests {
     use super::*;
     use crate::controller::events::{ChatEvent, StubConfig};
     use crate::controller::services::{stub, IdentityService};
-    use crate::scenario::{DeterministicScenario, WrapperKind};
+    use crate::messages::{WrapperFrame, WrapperKind};
+
+    mod scenario {
+        use super::WrapperFrame;
+        use super::WrapperKind;
+
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/scenario.rs"
+        ));
+    }
+    use scenario::DeterministicScenario;
 
     #[test]
     fn ingest_backlog_matches_expected_messages() {
@@ -442,15 +453,16 @@ mod tests {
             relay_url: "stub://relay".to_string(),
             nostr_url: "stub://nostr".to_string(),
             session_id: "test-session".to_string(),
-            secret_hex: config.joiner_secret_hex.clone(),
+            secret_hex: config.invitee_secret_hex.clone(),
             invitee_pubkey: Some(config.creator_pubkey.clone()),
             group_id_hex: Some(config.group_id_hex.clone()),
+            admin_pubkeys: Vec::new(),
             stub: Some(StubConfig::default()),
         };
 
         let identity = IdentityService::create(&session.secret_hex).expect("identity");
         identity
-            .import_key_package_bundle(&config.joiner_key_package.bundle)
+            .import_key_package_bundle(&config.invitee_key_package.bundle)
             .expect("import bundle");
         let accepted_group = identity
             .accept_welcome(&config.welcome_json)

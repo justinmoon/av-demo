@@ -43,6 +43,8 @@ pub struct SessionParams {
     #[serde(default)]
     pub group_id_hex: Option<String>,
     #[serde(default)]
+    pub admin_pubkeys: Vec<String>,
+    #[serde(default)]
     pub stub: Option<StubConfig>,
 }
 

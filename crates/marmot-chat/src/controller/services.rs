@@ -17,7 +17,7 @@ use openmls::prelude::{KeyPackageBundle, OpenMlsProvider};
 use openmls_traits::storage::StorageProvider;
 use serde::{Deserialize, Serialize};
 
-use crate::scenario::WrapperFrame;
+use crate::messages::{WrapperFrame, WrapperKind};
 
 use super::events::{Role, SessionParams};
 
@@ -123,9 +123,25 @@ impl IdentityHandle {
         Ok(BASE64.encode(bytes))
     }
 
-    pub fn create_group(&self, invitee_event: &str, invitee_pub: &str) -> Result<GroupArtifacts> {
+    pub fn create_group(
+        &self,
+        invitee_event: &str,
+        invitee_pub: &str,
+        admin_pubkeys: &[String],
+    ) -> Result<GroupArtifacts> {
         let invitee = Event::from_json(invitee_event).context("parse invitee event")?;
         let invitee_pubkey = PublicKey::from_hex(invitee_pub).context("parse invitee pubkey")?;
+        let mut admins = vec![self.keys.public_key()];
+        for hex in admin_pubkeys {
+            if let Ok(pk) = PublicKey::from_hex(hex) {
+                if !admins.iter().any(|existing| existing == &pk) {
+                    admins.push(pk);
+                }
+            }
+        }
+        if !admins.iter().any(|pk| pk == &invitee_pubkey) {
+            admins.push(invitee_pubkey);
+        }
         let config = NostrGroupConfigData::new(
             "Marmot Chat".to_string(),
             "MoQ/MLS demo".to_string(),
@@ -133,7 +149,7 @@ impl IdentityHandle {
             DEFAULT_IMAGE_KEY,
             DEFAULT_IMAGE_NONCE,
             vec![],
-            vec![self.keys.public_key(), invitee_pubkey],
+            admins,
         );
         let result = self
             .mdk
@@ -220,7 +236,7 @@ impl IdentityHandle {
             .context("create message")?;
         Ok(WrapperFrame {
             bytes: wrapper.as_json().into_bytes(),
-            kind: crate::scenario::WrapperKind::Application {
+            kind: WrapperKind::Application {
                 author: self.keys.public_key().to_hex(),
                 content: content.to_string(),
             },
@@ -238,7 +254,7 @@ impl IdentityHandle {
         let _ = self.merge_pending_commit()?;
         Ok(WrapperFrame {
             bytes: json.into_bytes(),
-            kind: crate::scenario::WrapperKind::Commit,
+            kind: WrapperKind::Commit,
         })
     }
 

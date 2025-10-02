@@ -8,6 +8,7 @@ export interface ChatSession {
   secretHex: string;
   inviteePubkey?: string;
   groupIdHex?: string;
+  adminPubkeys?: string[];
 }
 
 export interface ChatMessage {
