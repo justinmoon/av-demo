@@ -7,30 +7,30 @@
 
 ## Critical Issues to Fix Before Adding Features
 
-### 1. **File Naming Disaster** (HIGH PRIORITY)
+### 1. ✅ **File Naming Disaster** (COMPLETED)
 **Problem**: Arbitrary "part1/part2/part3" naming gives zero semantic meaning
 
-**Files**:
+**Files renamed** (commits bd6179e, f852059):
 ```
-controller/state/part1.rs    # Core state + operations
-controller/state/part2.rs    # Handshake + invite logic
-wasm/part1a.rs              # Identity/MDK WASM bindings
-wasm/part1b.rs              # Nostr WebSocket client
-wasm/part2.rs               # MoQ bridge
-wasm/part3.rs               # Controller bridge
-wasm/part4.rs               # Wrapper processing utilities
+controller/state/part1.rs → core.rs (then split into types.rs, member.rs, message.rs, ready.rs)
+controller/state/part2.rs → handshake.rs
+wasm/part1a.rs → identity.rs
+wasm/part1b.rs → nostr_client.rs
+wasm/part2.rs → moq_bridge.rs
+wasm/part3.rs → controller_bridge.rs
+wasm/part4.rs → wrapper_utils.rs
 ```
 
-**Fix**: Rename to semantic modules (from spaghetti.md suggestions):
-- `controller/state/part1.rs` → `controller/core_state.rs` (state machine, operations, members)
-- `controller/state/part2.rs` → `controller/handshake.rs` (MLS handshake, invites)
-- `wasm/part1a.rs` → `wasm/identity.rs` (MDK/OpenMLS bindings)
-- `wasm/part1b.rs` → `wasm/nostr_client.rs` (WebSocket handshake relay)
-- `wasm/part2.rs` → `wasm/moq_bridge.rs` (MoQ subscription/publish)
-- `wasm/part3.rs` → `wasm/controller_bridge.rs` (Controller lifecycle)
-- `wasm/part4.rs` → `wasm/wrapper_utils.rs` (Wrapper processing helpers)
+**Additional refactor**: Split controller/state/core.rs (346 lines) into semantic modules:
+- `types.rs` (70 lines) - type definitions
+- `member.rs` (124 lines) - member management
+- `message.rs` (59 lines) - message handling
+- `ready.rs` (36 lines) - ready state management
+- `core.rs` (82 lines) - constructor and basic helpers
+- `handshake.rs` (unchanged) - handshake protocol
+- `utils.rs` (41 lines) - utility functions
 
-**Impact**: Code navigation, onboarding, maintenance all suffer
+**Result**: Clear semantic organization, files under 150 lines each
 
 ---
 
@@ -57,22 +57,16 @@ wasm/part4.rs               # Wrapper processing utilities
 
 ---
 
-### 3. **include!() Anti-Pattern** (spaghetti.md §Module Organization)
+### 3. ✅ **include!() Anti-Pattern** (COMPLETED)
 **Problem**: Files are `include!()` into parent instead of proper modules
 
-**Example** (`controller/state/mod.rs`):
-```rust
-pub mod part1;
-pub mod part2;
-// Then parent does include!("state/part1.rs")
-```
+**Fixed** (commits bd6179e, f852059):
+- Replaced all `include!()` with proper `mod` declarations
+- `controller/state/mod.rs` now uses standard module system
+- `wasm/mod.rs` uses proper module declarations
+- All modules properly scoped with `pub(super)` for internal APIs
 
-**Why it exists**: Keep files under 500 LOC for "readability"
-
-**Fix**:
-- Proper Rust modules with `mod.rs` or module files
-- Logical boundaries based on responsibility, not LOC count
-- Use `#[path]` if needed for organization, not `include!()`
+**Result**: Standard Rust module organization, better IDE support, clear public APIs
 
 ---
 
@@ -218,12 +212,12 @@ const TRACK_NAME = 'wrappers';  // Hardcoded!
 ## Prioritized Cleanup Tasks
 
 ### P0 (Do Before Next Feature)
-1. **Rename part*.rs files** - Blocks code navigation and understanding
+1. ✅ **Rename part*.rs files** - DONE (commits bd6179e, f852059)
 2. **State management cleanup** - Remove duplicate member tracking
 3. **Document architecture** - How pieces fit together
 
 ### P1 (Do This Week)
-4. **Fix include!() pattern** - Proper Rust modules
+4. ✅ **Fix include!() pattern** - DONE (commits bd6179e, f852059)
 5. **Add unit tests** - Controller state transitions
 6. **Error boundary UI** - User-facing error recovery
 
