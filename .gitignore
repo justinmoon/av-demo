@@ -10,3 +10,6 @@ playwright-report/
 worktrees/
 .direnv/
 nostr.db
+
+# Nostr relay database
+nostr.db*
