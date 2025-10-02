@@ -2,30 +2,30 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum Role {
-    Creator,
-    Joiner,
+pub enum SessionRole {
+    Initial,
+    Invitee,
 }
 
-impl Role {
-    pub fn peer(self) -> Role {
+impl SessionRole {
+    pub fn peer(self) -> SessionRole {
         match self {
-            Role::Creator => Role::Joiner,
-            Role::Joiner => Role::Creator,
+            SessionRole::Initial => SessionRole::Invitee,
+            SessionRole::Invitee => SessionRole::Initial,
         }
     }
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            Role::Creator => "creator",
-            Role::Joiner => "joiner",
+            SessionRole::Initial => "initial",
+            SessionRole::Invitee => "invitee",
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Role> {
+    pub fn from_str(value: &str) -> Option<SessionRole> {
         match value {
-            "creator" => Some(Role::Creator),
-            "joiner" => Some(Role::Joiner),
+            "initial" => Some(SessionRole::Initial),
+            "invitee" => Some(SessionRole::Invitee),
             _ => None,
         }
     }
@@ -33,13 +33,13 @@ impl Role {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionParams {
-    pub role: Role,
+    pub bootstrap_role: SessionRole,
     pub relay_url: String,
     pub nostr_url: String,
     pub session_id: String,
     pub secret_hex: String,
     #[serde(default)]
-    pub invitee_pubkey: Option<String>,
+    pub peer_pubkeys: Vec<String>,
     #[serde(default)]
     pub group_id_hex: Option<String>,
     #[serde(default)]
@@ -70,6 +70,13 @@ pub struct StubWrapper {
     pub label: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemberInfo {
+    pub pubkey: String,
+    #[serde(default)]
+    pub is_admin: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatEvent {
@@ -87,6 +94,23 @@ pub enum ChatEvent {
     },
     Commit {
         total: u32,
+    },
+    Roster {
+        members: Vec<MemberInfo>,
+    },
+    MemberJoined {
+        member: MemberInfo,
+    },
+    MemberUpdated {
+        member: MemberInfo,
+    },
+    MemberLeft {
+        pubkey: String,
+    },
+    InviteGenerated {
+        welcome: String,
+        recipient: String,
+        is_admin: bool,
     },
     Error {
         message: String,

@@ -1,4 +1,4 @@
-export type Role = 'creator' | 'joiner';
+export type Role = 'initial' | 'invitee';
 
 export interface ChatSession {
   role: Role;
@@ -6,9 +6,9 @@ export interface ChatSession {
   nostr: string;
   sessionId: string;
   secretHex: string;
-  inviteePubkey?: string;
   groupIdHex?: string;
   adminPubkeys?: string[];
+  peerPubkeys?: string[];
 }
 
 export interface ChatMessage {
@@ -19,7 +19,13 @@ export interface ChatMessage {
   system?: boolean;
 }
 
+export interface ChatMember {
+  pubkey: string;
+  isAdmin: boolean;
+}
+
 export interface ChatState {
   messages: ChatMessage[];
   commits: number;
+  members: ChatMember[];
 }

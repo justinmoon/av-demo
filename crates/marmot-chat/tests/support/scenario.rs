@@ -33,12 +33,12 @@ pub struct ScenarioConfig {
     pub invitee_key_package: ConfigKeyPackage,
     pub invitee_secret_hex: String,
     pub creator_pubkey: String,
-    pub invitee_pubkey: String,
     pub group_id: GroupId,
     pub group_id_hex: String,
     pub group_root: String,
     pub wrappers_track: String,
     pub inbox_track: String,
+    pub peer_pubkeys: Vec<String>,
 }
 
 pub struct DeterministicScenario {
@@ -84,7 +84,6 @@ impl DeterministicScenario {
         let group_root = derive_group_root(&creator.mdk, &group_id).context("derive group root")?;
 
         let creator_pubkey = creator.keys.public_key().to_hex();
-        let invitee_pubkey = invitee_keys.public_key().to_hex();
 
         let conversation = Conversation::new(group_id.clone(), creator);
 
@@ -92,13 +91,13 @@ impl DeterministicScenario {
             welcome_json,
             invitee_key_package: key_pkg,
             invitee_secret_hex: INVITEE_SECRET.to_string(),
-            creator_pubkey,
-            invitee_pubkey,
+            creator_pubkey: creator_pubkey.clone(),
             group_id,
             group_id_hex,
             group_root,
             wrappers_track: DEFAULT_TRACK.to_string(),
             inbox_track: DEFAULT_INBOX_TRACK.to_string(),
+            peer_pubkeys: vec![creator_pubkey],
         };
 
         Ok(Self {

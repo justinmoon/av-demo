@@ -1,7 +1,7 @@
 import { createEffect, createSignal, onCleanup } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import { For } from 'solid-js';
-import type { ChatSession, ChatMessage, ChatState } from '../types';
+import type { ChatSession, ChatMessage, ChatState, ChatMember } from '../types';
 import type { ChatHandle, ChatCallbacks } from '../chat/controller';
 
 export interface ChatViewProps {
@@ -14,7 +14,7 @@ export type { ChatSession };
 
 export function ChatView(props: ChatViewProps) {
   const [status, setStatus] = createSignal('Initializing…');
-  const [chatState, setChatState] = createStore<ChatState>({ messages: [], commits: 0 });
+  const [chatState, setChatState] = createStore<ChatState>({ messages: [], commits: 0, members: [] });
   const [ready, setReady] = createSignal(false);
   const [sending, setSending] = createSignal(false);
 
@@ -29,6 +29,7 @@ export function ChatView(props: ChatViewProps) {
     const snapshot: ChatState = {
       messages: chatState.messages.map((message) => ({ ...message })),
       commits: chatState.commits,
+      members: chatState.members.map((member) => ({ ...member })),
     };
     (window as any).chatState = snapshot;
     (window as any).chatReady = ready();
@@ -47,6 +48,24 @@ export function ChatView(props: ChatViewProps) {
     setReady: (value) => {
       console.debug('[marmot-chat ui] ready', value);
       setReady(value);
+    },
+    setRoster: (members) => {
+      setChatState('members', members.map((member) => ({ ...member })));
+    },
+    upsertMember: (member) => {
+      setChatState('members', (current) => {
+        const next = [...current];
+        const index = next.findIndex((item) => item.pubkey === member.pubkey);
+        if (index >= 0) {
+          next[index] = { ...next[index], ...member };
+        } else {
+          next.push({ ...member });
+        }
+        return next;
+      });
+    },
+    removeMember: (pubkey) => {
+      setChatState('members', (current) => current.filter((member) => member.pubkey !== pubkey));
     },
   };
 
@@ -68,7 +87,7 @@ export function ChatView(props: ChatViewProps) {
 
     stopController();
     setStatus('Initializing…');
-    setChatState({ messages: [], commits: 0 });
+    setChatState({ messages: [], commits: 0, members: [] });
     setReady(false);
     if (messageInput) {
       messageInput.value = '';
@@ -174,6 +193,25 @@ export function ChatView(props: ChatViewProps) {
         </For>
       </section>
 
+      <section class="chat-app__roster" id="members" aria-live="polite">
+        <h2>Members</h2>
+        <ul>
+          <For each={chatState.members}>
+            {(member) => (
+              <li
+                classList={{
+                  member: true,
+                  'member--admin': member.isAdmin,
+                }}
+              >
+                <span class="member__pubkey">{shortenKey(member.pubkey)}</span>
+                {member.isAdmin && <span class="member__role">admin</span>}
+              </li>
+            )}
+          </For>
+        </ul>
+      </section>
+
       <footer class="chat-app__footer">
         <form id="composer" autocomplete="off" onSubmit={handleSubmit}>
           <label class="sr-only" for="message">
@@ -207,10 +245,10 @@ function shortenKey(key: string, length = 6) {
 
 function formatRole(role: ChatSession['role']) {
   switch (role) {
-    case 'creator':
+    case 'initial':
       return 'Creator';
-    case 'joiner':
-      return 'Joiner';
+    case 'invitee':
+      return 'Invitee';
     default:
       return role;
   }

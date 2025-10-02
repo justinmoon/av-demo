@@ -16,7 +16,7 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use web_sys::{BinaryType, ErrorEvent, MessageEvent, WebSocket};
 
-use crate::controller::events::{ChatEvent, Role, SessionParams};
+use crate::controller::events::{ChatEvent, SessionParams, SessionRole};
 use crate::controller::services::{
     stub, HandshakeConnectParams, HandshakeListener, HandshakeMessage, HandshakeMessageBody,
     HandshakeMessageType, IdentityService, MoqListener, MoqService, NostrService,
@@ -137,7 +137,7 @@ struct JsNostrState {
     keys: RefCell<Option<Keys>>,
     session: RefCell<Option<String>>,
     url: RefCell<Option<String>>,
-    role: RefCell<Role>,
+    role: RefCell<SessionRole>,
     on_message: RefCell<Option<Closure<dyn FnMut(MessageEvent)>>>,
     on_open: RefCell<Option<Closure<dyn FnMut(JsValue)>>>,
     on_error: RefCell<Option<Closure<dyn FnMut(ErrorEvent)>>>,
@@ -153,7 +153,7 @@ impl JsNostrService {
                 keys: RefCell::new(None),
                 session: RefCell::new(None),
                 url: RefCell::new(None),
-                role: RefCell::new(Role::Creator),
+                role: RefCell::new(SessionRole::Initial),
                 on_message: RefCell::new(None),
                 on_open: RefCell::new(None),
                 on_error: RefCell::new(None),
@@ -403,7 +403,7 @@ impl JsNostrState {
         let from_role = match payload
             .get("from")
             .and_then(|v| v.as_str())
-            .and_then(Role::from_str)
+            .and_then(SessionRole::from_str)
         {
             Some(role) => role,
             None => return,
@@ -421,7 +421,7 @@ impl JsNostrState {
     }
 }
 
-fn handshake_payload(session: &str, role: Role, message: &HandshakeMessage) -> JsonValue {
+fn handshake_payload(session: &str, role: SessionRole, message: &HandshakeMessage) -> JsonValue {
     let mut base = json!({
         "type": message.message_type.as_str(),
         "session": session,
@@ -556,8 +556,8 @@ impl MoqService for JsMoqService {
         &self,
         url: &str,
         session: &str,
-        role: Role,
-        peer_role: Role,
+        role: SessionRole,
+        peer_role: SessionRole,
         listener: Box<dyn MoqListener>,
     ) {
         *self.listener.borrow_mut() = Some(listener);

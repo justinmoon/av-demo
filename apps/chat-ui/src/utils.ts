@@ -88,7 +88,7 @@ export function loadSession(): ChatSession | null {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ChatSession;
-    if (parsed.role !== 'creator' && parsed.role !== 'joiner') {
+    if (parsed.role !== 'initial' && parsed.role !== 'invitee') {
       localStorage.removeItem(SESSION_STORAGE_KEY);
       return null;
     }
@@ -97,6 +97,12 @@ export function loadSession(): ChatSession | null {
     }
     if (!parsed.adminPubkeys) {
       parsed.adminPubkeys = [];
+    }
+    if (parsed.peerPubkeys && !Array.isArray(parsed.peerPubkeys)) {
+      parsed.peerPubkeys = [];
+    }
+    if (!parsed.peerPubkeys) {
+      parsed.peerPubkeys = [];
     }
     return parsed;
   } catch (err) {

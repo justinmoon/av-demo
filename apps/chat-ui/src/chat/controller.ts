@@ -1,5 +1,5 @@
 import initWasm, { WasmChatController } from '../../../../tests/pkg/marmot_chat.js';
-import type { ChatMessage, ChatSession } from '../types';
+import type { ChatMember, ChatMessage, ChatSession } from '../types';
 import { createMoqBridge } from '../bridge/moq';
 
 export interface ChatCallbacks {
@@ -7,6 +7,9 @@ export interface ChatCallbacks {
   pushMessage(message: ChatMessage): void;
   setCommits(total: number): void;
   setReady(ready: boolean): void;
+  setRoster(members: ChatMember[]): void;
+  upsertMember(member: ChatMember): void;
+  removeMember(pubkey: string): void;
 }
 
 export interface ChatHandle {
@@ -32,6 +35,16 @@ export async function startChat(session: ChatSession, callbacks: ChatCallbacks):
   await ensureWasm();
   await createMoqBridge();
 
+  const toMember = (raw: any): ChatMember | null => {
+    if (!raw || typeof raw !== 'object') return null;
+    const pubkey = typeof raw.pubkey === 'string' ? raw.pubkey : String(raw.pubkey ?? '');
+    if (!pubkey) return null;
+    return {
+      pubkey,
+      isAdmin: Boolean((raw as any).is_admin ?? (raw as any).isAdmin ?? false),
+    };
+  };
+
   const eventHandler = (event: any) => {
     console.debug('[marmot-chat event]', event);
     switch (event.type) {
@@ -55,6 +68,36 @@ export async function startChat(session: ChatSession, callbacks: ChatCallbacks):
       case 'commit':
         callbacks.setCommits(Number(event.total ?? 0));
         break;
+      case 'roster': {
+        const members = Array.isArray(event.members)
+          ? (event.members as any[])
+              .map((member) => toMember(member))
+              .filter((member): member is ChatMember => member !== null)
+          : [];
+        callbacks.setRoster(members);
+        break;
+      }
+      case 'member_joined':
+      case 'member_updated': {
+        const member = toMember((event as any).member);
+        if (member) {
+          callbacks.upsertMember(member);
+        }
+        break;
+      }
+      case 'member_left': {
+        const pubkey = typeof event.pubkey === 'string' ? event.pubkey : '';
+        if (pubkey) {
+          callbacks.removeMember(pubkey);
+        }
+        break;
+      }
+      case 'invite_generated': {
+        const recipient = typeof event.recipient === 'string' ? event.recipient : 'unknown recipient';
+        const adminFlag = event.is_admin ? 'admin' : 'member';
+        callbacks.setStatus(`Invite ready for ${recipient} (${adminFlag})`);
+        break;
+      }
       case 'error':
         callbacks.setStatus(`Error: ${String(event.message ?? 'unknown')}`);
         callbacks.setReady(false);
@@ -68,14 +111,14 @@ export async function startChat(session: ChatSession, callbacks: ChatCallbacks):
   };
 
   const sessionValue = {
-    role: session.role,
+    bootstrap_role: session.role,
     relay_url: session.relay,
     nostr_url: session.nostr,
     session_id: session.sessionId,
     secret_hex: session.secretHex,
-    invitee_pubkey: session.inviteePubkey,
     group_id_hex: session.groupIdHex,
     admin_pubkeys: session.adminPubkeys ?? [],
+    peer_pubkeys: session.peerPubkeys ?? [],
   };
 
   const controller = WasmChatController.start(sessionValue, eventHandler);

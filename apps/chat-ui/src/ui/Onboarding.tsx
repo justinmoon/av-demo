@@ -41,7 +41,7 @@ export function Onboarding(props: OnboardingProps) {
   const [loginError, setLoginError] = createSignal<string>('');
   const [relayUrl, setRelayUrl] = createSignal(props.defaults.relay ?? 'http://127.0.0.1:54943/marmot');
   const [nostrUrl, setNostrUrl] = createSignal(props.defaults.nostr ?? 'ws://127.0.0.1:7447/');
-  const [inviteePub, setInviteePub] = createSignal('');
+  const [peerPub, setPeerPub] = createSignal('');
   const [inviteLink, setInviteLink] = createSignal('');
   const [sessionId, setSessionId] = createSignal('');
   const [joinError, setJoinError] = createSignal('');
@@ -107,8 +107,8 @@ export function Onboarding(props: OnboardingProps) {
     event.preventDefault();
     setCreateError('');
     try {
-      const peer = normalizeHex(inviteePub(), 'Invitee pubkey');
-      setInviteePub(peer);
+      const peer = normalizeHex(peerPub(), 'Peer pubkey');
+      setPeerPub(peer);
       const session = crypto.randomUUID().replace(/-/g, '');
       setSessionId(session);
       const invitePayload = { session, relay: relayUrl(), nostr: nostrUrl() };
@@ -133,12 +133,13 @@ export function Onboarding(props: OnboardingProps) {
     setNostrUrl(parsed.nostr);
     setSessionId(parsed.session);
     const session: ChatSession = {
-      role: 'joiner',
+      role: 'invitee',
       relay: parsed.relay,
       nostr: parsed.nostr,
       sessionId: parsed.session,
       secretHex: secretHex(),
       adminPubkeys: [],
+      peerPubkeys: [],
     };
     persistSession(session);
     props.onComplete({ session });
@@ -146,13 +147,13 @@ export function Onboarding(props: OnboardingProps) {
 
   const enterChat = () => {
     const session: ChatSession = {
-      role: 'creator',
+      role: 'initial',
       relay: relayUrl(),
       nostr: nostrUrl(),
       sessionId: sessionId(),
       secretHex: secretHex(),
-      inviteePubkey: inviteePub(),
       adminPubkeys: [pubkey()],
+      peerPubkeys: peerPub() ? [peerPub()] : [],
     };
     persistSession(session);
     props.onComplete({ session });
@@ -224,12 +225,12 @@ export function Onboarding(props: OnboardingProps) {
           <section class="card">
             <h2>Create chat</h2>
             <form onSubmit={handleCreateSubmit}>
-              <label for="create-peer">Invitee pubkey</label>
+              <label for="create-peer">Peer pubkey</label>
               <input
                 id="create-peer"
                 data-testid="create-peer"
-                value={inviteePub()}
-                onInput={(event) => setInviteePub(event.currentTarget.value.trim())}
+                value={peerPub()}
+                onInput={(event) => setPeerPub(event.currentTarget.value.trim())}
               />
 
               <label for="create-relay">MoQ relay URL</label>

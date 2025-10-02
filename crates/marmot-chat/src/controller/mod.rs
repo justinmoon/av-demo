@@ -119,8 +119,8 @@ impl ChatRuntime {
                 state_ref.moq.connect(
                     &state_ref.session.relay_url,
                     &state_ref.session.session_id,
-                    state_ref.session.role,
-                    state_ref.session.role.peer(),
+                    state_ref.session.bootstrap_role,
+                    state_ref.session.bootstrap_role.peer(),
                     listener,
                 );
             }

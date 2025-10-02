@@ -1,10 +1,12 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
 use futures::channel::mpsc::UnboundedSender;
 
-use crate::controller::events::{ChatEvent, HandshakePhase, Role, SessionParams};
+use crate::controller::events::{
+    ChatEvent, HandshakePhase, MemberInfo, SessionParams, SessionRole,
+};
 use crate::controller::services::{
     GroupArtifacts, HandshakeConnectParams, HandshakeListener, HandshakeMessage,
     HandshakeMessageBody, HandshakeMessageType, IdentityHandle, KeyPackageExport, MoqService,
@@ -32,8 +34,16 @@ pub struct ControllerState {
     pub ready: bool,
     pub outgoing_queue: VecDeque<Vec<u8>>,
     pub key_package_cache: Option<KeyPackageExport>,
-    pub invitee_pubkey: Option<String>,
     pub welcome_json: Option<String>,
+    pub members: BTreeMap<String, MemberRecord>,
+    pub admin_pubkeys: BTreeSet<String>,
+    pub peer_pubkeys: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemberRecord {
+    pub info: MemberInfo,
+    pub joined: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -60,11 +70,44 @@ pub enum HandshakeState {
 
 impl ControllerState {
     pub fn new(config: ControllerConfig) -> Self {
-        let role = config.session.role;
+        let role = config.session.bootstrap_role;
         let handshake = match role {
-            Role::Creator => HandshakeState::WaitingForKeyPackage,
-            Role::Joiner => HandshakeState::WaitingForWelcome,
+            SessionRole::Initial => HandshakeState::WaitingForKeyPackage,
+            SessionRole::Invitee => HandshakeState::WaitingForWelcome,
         };
+        let mut admin_pubkeys: BTreeSet<String> =
+            config.session.admin_pubkeys.iter().cloned().collect();
+        if role == SessionRole::Initial {
+            admin_pubkeys.insert(config.identity.public_key_hex());
+        }
+        let mut members = BTreeMap::new();
+        let self_pub = config.identity.public_key_hex();
+        let is_admin = admin_pubkeys.contains(&self_pub);
+        members.insert(
+            self_pub.clone(),
+            MemberRecord {
+                info: MemberInfo {
+                    pubkey: self_pub,
+                    is_admin,
+                },
+                joined: false,
+            },
+        );
+
+        let peer_pubkeys: BTreeSet<String> = config.session.peer_pubkeys.iter().cloned().collect();
+        for peer in &peer_pubkeys {
+            if peer == &config.identity.public_key_hex() {
+                continue;
+            }
+            let peer_is_admin = admin_pubkeys.contains(peer);
+            members.entry(peer.clone()).or_insert_with(|| MemberRecord {
+                info: MemberInfo {
+                    pubkey: peer.clone(),
+                    is_admin: peer_is_admin,
+                },
+                joined: false,
+            });
+        }
         Self {
             identity: config.identity,
             session: config.session,
@@ -76,8 +119,10 @@ impl ControllerState {
             ready: false,
             outgoing_queue: VecDeque::new(),
             key_package_cache: None,
-            invitee_pubkey: None,
             welcome_json: None,
+            members,
+            admin_pubkeys,
+            peer_pubkeys,
         }
     }
 
@@ -87,6 +132,86 @@ impl ControllerState {
 
     pub fn emit_handshake_phase(&self, phase: HandshakePhase) {
         (self.callback)(ChatEvent::Handshake { phase });
+    }
+
+    fn emit_roster(&self) {
+        let members: Vec<MemberInfo> = self
+            .members
+            .values()
+            .filter(|record| record.joined)
+            .map(|record| record.info.clone())
+            .collect();
+        if !members.is_empty() {
+            (self.callback)(ChatEvent::Roster { members });
+        }
+    }
+
+    fn ensure_member(&mut self, pubkey: &str) -> &mut MemberRecord {
+        let is_admin = self.admin_pubkeys.contains(pubkey);
+        self.peer_pubkeys.insert(pubkey.to_string());
+        self.members
+            .entry(pubkey.to_string())
+            .or_insert_with(|| MemberRecord {
+                info: MemberInfo {
+                    pubkey: pubkey.to_string(),
+                    is_admin,
+                },
+                joined: false,
+            })
+    }
+
+    fn mark_member_joined(&mut self, pubkey: &str) {
+        let newly_joined = {
+            let entry = self.ensure_member(pubkey);
+            if entry.joined {
+                false
+            } else {
+                entry.joined = true;
+                true
+            }
+        };
+        if newly_joined {
+            if let Some(record) = self.members.get(pubkey) {
+                (self.callback)(ChatEvent::MemberJoined {
+                    member: record.info.clone(),
+                });
+            }
+            self.emit_roster();
+        }
+    }
+
+    fn update_member_admin(&mut self, pubkey: &str, is_admin: bool) {
+        if is_admin {
+            self.admin_pubkeys.insert(pubkey.to_string());
+        } else {
+            self.admin_pubkeys.remove(pubkey);
+        }
+
+        let mut updated_member: Option<MemberInfo> = None;
+        if let Some(entry) = self.members.get_mut(pubkey) {
+            if entry.info.is_admin != is_admin {
+                entry.info.is_admin = is_admin;
+                updated_member = Some(entry.info.clone());
+            }
+        } else {
+            let entry = self.ensure_member(pubkey);
+            entry.info.is_admin = is_admin;
+            updated_member = Some(entry.info.clone());
+        }
+
+        if let Some(member) = updated_member {
+            (self.callback)(ChatEvent::MemberUpdated {
+                member: member.clone(),
+            });
+            if self
+                .members
+                .get(pubkey)
+                .map(|record| record.joined)
+                .unwrap_or(false)
+            {
+                self.emit_roster();
+            }
+        }
     }
 
     pub fn enqueue_outgoing(&mut self, bytes: Vec<u8>) {
@@ -104,6 +229,7 @@ impl ControllerState {
                 content,
                 created_at,
             } => {
+                self.mark_member_joined(&author);
                 let local = author == self.identity.public_key_hex();
                 Ok(vec![ChatEvent::Message {
                     author,
@@ -184,15 +310,14 @@ impl ControllerState {
         let params = HandshakeConnectParams {
             url: self.session.nostr_url.clone(),
             session: self.session.session_id.clone(),
-            role: self.session.role,
+            role: self.session.bootstrap_role,
             secret_hex: self.session.secret_hex.clone(),
         };
         self.nostr.connect(params, listener);
-        self.invitee_pubkey = self.session.invitee_pubkey.clone();
         self.emit_handshake_phase(self.handshake_phase());
 
-        match self.session.role {
-            Role::Creator => {
+        match self.session.bootstrap_role {
+            SessionRole::Initial => {
                 self.emit_status("Requesting key package…");
                 schedule(
                     tx,
@@ -202,7 +327,7 @@ impl ControllerState {
                     }),
                 );
             }
-            Role::Joiner => {
+            SessionRole::Invitee => {
                 self.emit_status("Generating key package…");
                 let export = if let Some(stub) = self.session.stub.clone() {
                     if let Some(event) = stub.key_package_event {
@@ -247,9 +372,9 @@ impl ControllerState {
         tx: &UnboundedSender<Operation>,
         message: HandshakeMessage,
     ) -> Result<()> {
-        match self.session.role {
-            Role::Creator => self.handle_handshake_as_creator(tx, message),
-            Role::Joiner => self.handle_handshake_as_joiner(tx, message),
+        match self.session.bootstrap_role {
+            SessionRole::Initial => self.handle_handshake_as_creator(tx, message),
+            SessionRole::Invitee => self.handle_handshake_as_joiner(tx, message),
         }
     }
 
@@ -269,9 +394,13 @@ impl ControllerState {
                     _ => return Err(anyhow!("missing key package payload")),
                 };
                 let invitee_pub = pubkey
-                    .or_else(|| self.invitee_pubkey.clone())
+                    .or_else(|| self.session.peer_pubkeys.first().cloned())
                     .ok_or_else(|| anyhow!("invitee pubkey missing"))?;
-                self.invitee_pubkey = Some(invitee_pub.clone());
+                self.peer_pubkeys.insert(invitee_pub.clone());
+                self.ensure_member(&invitee_pub);
+                if self.admin_pubkeys.contains(&invitee_pub) {
+                    self.update_member_admin(&invitee_pub, true);
+                }
                 self.key_package_cache = Some(KeyPackageExport {
                     event_json: event.clone(),
                     bundle: bundle.clone().unwrap_or_default(),
@@ -298,6 +427,8 @@ impl ControllerState {
                 self.handshake = HandshakeState::Established;
                 self.emit_handshake_phase(HandshakePhase::Finalizing);
                 schedule(tx, Operation::ConnectMoq);
+                self.mark_member_joined(&self.identity.public_key_hex());
+                self.mark_member_joined(&invitee_pub);
                 Ok(())
             }
             HandshakeMessageType::RequestWelcome => {
@@ -341,6 +472,16 @@ impl ControllerState {
                 }
                 self.emit_status("Accepting welcome…");
                 let accepted_group = self.identity.accept_welcome(&welcome)?;
+                self.mark_member_joined(&self.identity.public_key_hex());
+                let known_peers = self.session.peer_pubkeys.clone();
+                for peer in known_peers {
+                    self.peer_pubkeys.insert(peer.clone());
+                    self.ensure_member(&peer);
+                    if self.admin_pubkeys.contains(&peer) {
+                        self.update_member_admin(&peer, true);
+                    }
+                    self.mark_member_joined(&peer);
+                }
                 if let Some(provided) = group_id_hex {
                     if provided != accepted_group {
                         log::warn!(
@@ -449,12 +590,12 @@ mod tests {
             .expect("initial backlog");
 
         let session = SessionParams {
-            role: Role::Joiner,
+            bootstrap_role: SessionRole::Invitee,
             relay_url: "stub://relay".to_string(),
             nostr_url: "stub://nostr".to_string(),
             session_id: "test-session".to_string(),
             secret_hex: config.invitee_secret_hex.clone(),
-            invitee_pubkey: Some(config.creator_pubkey.clone()),
+            peer_pubkeys: vec![config.creator_pubkey.clone()],
             group_id_hex: Some(config.group_id_hex.clone()),
             admin_pubkeys: Vec::new(),
             stub: Some(StubConfig::default()),

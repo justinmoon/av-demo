@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::messages::{WrapperFrame, WrapperKind};
 
-use super::events::{Role, SessionParams};
+use super::events::{SessionParams, SessionRole};
 
 const DEFAULT_IMAGE_HASH: Option<[u8; 32]> = None;
 const DEFAULT_IMAGE_KEY: Option<[u8; 32]> = None;
@@ -29,6 +29,18 @@ const DEFAULT_IMAGE_NONCE: Option<[u8; 12]> = None;
 pub struct GroupArtifacts {
     pub group_id_hex: String,
     pub welcome: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct WelcomeArtifact {
+    pub welcome: String,
+    pub recipient: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AddMembersArtifacts {
+    pub commit: WrapperFrame,
+    pub welcomes: Vec<WelcomeArtifact>,
 }
 
 pub struct IdentityHandle {
@@ -165,6 +177,44 @@ impl IdentityHandle {
         Ok(GroupArtifacts {
             group_id_hex: hex::encode(group_id.as_slice()),
             welcome: welcome.as_json(),
+        })
+    }
+
+    pub fn add_members(&self, key_package_events: &[String]) -> Result<AddMembersArtifacts> {
+        let group_id = self.group_id()?;
+        let events: Vec<Event> = key_package_events
+            .iter()
+            .map(|event_json| Event::from_json(event_json).context("parse key package event"))
+            .collect::<Result<_, _>>()?;
+
+        let update = self
+            .mdk
+            .add_members(&group_id, &events)
+            .context("add members")?;
+
+        let commit_json = update.evolution_event.as_json();
+        let _ = self.ingest_wrapper(commit_json.as_bytes())?;
+        self.merge_pending_commit()?;
+
+        let commit_frame = WrapperFrame {
+            bytes: commit_json.into_bytes(),
+            kind: WrapperKind::Commit,
+        };
+
+        let welcomes = update
+            .welcome_rumors
+            .unwrap_or_default()
+            .into_iter()
+            .zip(events.iter())
+            .map(|(rumor, event)| WelcomeArtifact {
+                welcome: rumor.as_json(),
+                recipient: event.pubkey.to_hex(),
+            })
+            .collect();
+
+        Ok(AddMembersArtifacts {
+            commit: commit_frame,
+            welcomes,
         })
     }
 
@@ -314,7 +364,7 @@ pub trait NostrService {
 pub struct HandshakeConnectParams {
     pub url: String,
     pub session: String,
-    pub role: Role,
+    pub role: SessionRole,
     pub secret_hex: String,
 }
 
@@ -379,8 +429,8 @@ pub trait MoqService {
         &self,
         url: &str,
         session: &str,
-        role: Role,
-        peer_role: Role,
+        role: SessionRole,
+        peer_role: SessionRole,
         listener: Box<dyn MoqListener>,
     );
     fn publish_wrapper(&self, bytes: &[u8]);
@@ -398,19 +448,19 @@ pub mod stub {
         session: &SessionParams,
     ) -> (Rc<dyn NostrService>, Rc<dyn MoqService>) {
         let stub = session.stub.clone().unwrap_or_default();
-        let nostr = Rc::new(StubNostrService::new(session.role, stub.clone()));
+        let nostr = Rc::new(StubNostrService::new(session.bootstrap_role, stub.clone()));
         let moq = Rc::new(StubMoqService::new(stub));
         (nostr, moq)
     }
 
     struct StubNostrService {
-        role: Role,
+        role: SessionRole,
         stub: StubConfig,
         listener: RefCell<Option<Box<dyn HandshakeListener>>>,
     }
 
     impl StubNostrService {
-        fn new(role: Role, stub: StubConfig) -> Self {
+        fn new(role: SessionRole, stub: StubConfig) -> Self {
             Self {
                 role,
                 stub,
@@ -455,11 +505,11 @@ pub mod stub {
         fn connect(&self, _params: HandshakeConnectParams, listener: Box<dyn HandshakeListener>) {
             *self.listener.borrow_mut() = Some(listener);
             match self.role {
-                Role::Joiner => {
+                SessionRole::Invitee => {
                     self.emit_key_package();
                     self.emit_welcome();
                 }
-                Role::Creator => {}
+                SessionRole::Initial => {}
             }
         }
 
@@ -512,8 +562,8 @@ pub mod stub {
             &self,
             _url: &str,
             _session: &str,
-            _role: Role,
-            _peer_role: Role,
+            _role: SessionRole,
+            _peer_role: SessionRole,
             listener: Box<dyn MoqListener>,
         ) {
             *self.listener.borrow_mut() = Some(listener);
