@@ -2,7 +2,31 @@
 // Nostr service (handshake over websocket)
 // =====================================================
 
-struct JsNostrService {
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::rc::Rc;
+
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+
+use js_sys::Object;
+use log::debug;
+use serde_json::{json, Value as JsonValue};
+use web_sys::{BinaryType, ErrorEvent, MessageEvent, WebSocket};
+
+use nostr::prelude::*;
+use nostr::JsonUtil;
+
+use crate::controller::events::SessionRole;
+use crate::controller::services::{
+    HandshakeConnectParams, HandshakeListener, HandshakeMessage, HandshakeMessageBody,
+    HandshakeMessageType, NostrService,
+};
+
+use super::identity::{js_error, HANDSHAKE_KIND};
+
+pub(super) struct JsNostrService {
     state: Rc<JsNostrState>,
 }
 
@@ -20,7 +44,7 @@ struct JsNostrState {
 }
 
 impl JsNostrService {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             state: Rc::new(JsNostrState {
                 socket: RefCell::new(None),

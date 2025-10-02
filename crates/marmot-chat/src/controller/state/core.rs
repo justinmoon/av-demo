@@ -15,6 +15,8 @@ use crate::controller::services::{
 };
 use nostr::{prelude::FromBech32, PublicKey};
 
+use super::utils::{now_timestamp, schedule};
+
 pub type EventCallback = Rc<dyn Fn(ChatEvent)>;
 
 pub struct ControllerConfig {
@@ -158,7 +160,7 @@ impl ControllerState {
         }
     }
 
-    fn ensure_member(&mut self, pubkey: &str) -> &mut MemberRecord {
+    pub(super) fn ensure_member(&mut self, pubkey: &str) -> &mut MemberRecord {
         let is_admin = self.admin_pubkeys.contains(pubkey);
         self.peer_pubkeys.insert(pubkey.to_string());
         self.members
@@ -172,7 +174,7 @@ impl ControllerState {
             })
     }
 
-    fn mark_member_joined(&mut self, pubkey: &str) {
+    pub(super) fn mark_member_joined(&mut self, pubkey: &str) {
         let newly_joined = {
             let entry = self.ensure_member(pubkey);
             if entry.joined {
@@ -192,7 +194,7 @@ impl ControllerState {
         }
     }
 
-    fn update_member_admin(&mut self, pubkey: &str, is_admin: bool) {
+    pub(super) fn update_member_admin(&mut self, pubkey: &str, is_admin: bool) {
         if is_admin {
             self.admin_pubkeys.insert(pubkey.to_string());
         } else {
@@ -262,7 +264,7 @@ impl ControllerState {
         }
     }
 
-    fn sync_members_from_identity(&mut self) -> Result<()> {
+    pub(super) fn sync_members_from_identity(&mut self) -> Result<()> {
         let members = match self.identity.list_members() {
             Ok(list) => list,
             Err(err) => {

@@ -1,5 +1,11 @@
-include!("part1a.rs");
-include!("part1b.rs");
-include!("part2.rs");
-include!("part3.rs");
-include!("part4.rs");
+mod identity;
+mod nostr_client;
+mod moq_bridge;
+mod controller_bridge;
+mod wrapper_utils;
+
+pub use identity::*;
+pub use nostr_client::*;
+pub use moq_bridge::*;
+pub use controller_bridge::*;
+pub use wrapper_utils::*;

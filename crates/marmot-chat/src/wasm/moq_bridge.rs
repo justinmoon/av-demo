@@ -1,7 +1,26 @@
 // MoQ service (bridge to JS implementation)
 // =====================================================
 
-struct JsMoqService {
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::{spawn_local, JsFuture};
+
+use js_sys::{Function, Object, Reflect, Uint8Array};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use serde_wasm_bindgen as swb;
+
+use crate::controller::services::MoqListener;
+use crate::controller::services::MoqService;
+
+use super::controller_bridge::{get_bridge_method, get_moq_bridge};
+use super::identity::js_error;
+
+pub(super) struct JsMoqService {
     handle: Rc<RefCell<Option<JsValue>>>,
     listener: Rc<RefCell<Option<Box<dyn MoqListener>>>>,
     pending: Rc<RefCell<Vec<Vec<u8>>>>,
@@ -13,7 +32,7 @@ struct JsMoqService {
 }
 
 impl JsMoqService {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             handle: Rc::new(RefCell::new(None)),
             listener: Rc::new(RefCell::new(None)),

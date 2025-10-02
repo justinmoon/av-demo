@@ -2,12 +2,42 @@
 // Utility helpers
 // =====================================================
 
-fn get_moq_bridge() -> Result<JsValue, JsValue> {
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::{spawn_local, JsFuture};
+
+use js_sys::{Function, Object, Reflect, Uint8Array};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use serde_wasm_bindgen as swb;
+
+use nostr::prelude::*;
+use nostr::JsonUtil;
+
+use mdk_core::{groups::NostrGroupConfigData, messages::MessageProcessingResult, MDK};
+use mdk_memory_storage::MdkMemoryStorage;
+use mdk_storage_traits::{groups::types::Group, GroupId};
+use openmls::prelude::{KeyPackageBundle, OpenMlsProvider};
+use openmls_traits::storage::StorageProvider;
+
+use crate::controller::events::{ChatEvent, SessionParams, SessionRole};
+use crate::controller::services::{IdentityService, MoqListener, MoqService, NostrService};
+use crate::controller::{ChatController, ControllerConfig};
+
+use super::identity::{js_error, MOQ_BRIDGE_KEY};
+
+pub(super) fn get_moq_bridge() -> Result<JsValue, JsValue> {
     let global = js_sys::global();
     Reflect::get(&global, &JsValue::from_str(MOQ_BRIDGE_KEY))
 }
 
-fn get_bridge_method(target: &JsValue, name: &str) -> Result<Function, JsValue> {
+pub(super) fn get_bridge_method(target: &JsValue, name: &str) -> Result<Function, JsValue> {
     Reflect::get(target, &JsValue::from_str(name))?.dyn_into()
 }
 thread_local! {
@@ -20,9 +50,9 @@ struct Registry {
     identities: HashMap<u32, LegacyIdentity>,
 }
 
-struct LegacyIdentity {
-    keys: Keys,
-    mdk: MDK<MdkMemoryStorage>,
+pub(super) struct LegacyIdentity {
+    pub(super) keys: Keys,
+    pub(super) mdk: MDK<MdkMemoryStorage>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -102,7 +132,7 @@ struct CreateMessageInput {
     rumor: JsonValue,
 }
 
-fn with_identity<F, R>(id: u32, f: F) -> Result<R, JsValue>
+pub(super) fn with_identity<F, R>(id: u32, f: F) -> Result<R, JsValue>
 where
     F: FnOnce(&mut LegacyIdentity) -> Result<R, JsValue>,
 {
@@ -116,7 +146,7 @@ where
     })
 }
 
-fn decode_hex(bytes_hex: &str) -> Result<Vec<u8>, JsValue> {
+pub(super) fn decode_hex(bytes_hex: &str) -> Result<Vec<u8>, JsValue> {
     hex::decode(bytes_hex).map_err(|e| js_error(format!("invalid hex: {e}")))
 }
 

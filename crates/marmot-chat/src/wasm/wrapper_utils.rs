@@ -1,3 +1,53 @@
+use wasm_bindgen::prelude::*;
+
+use js_sys::Uint8Array;
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use serde_wasm_bindgen as swb;
+
+use nostr::prelude::*;
+use nostr::JsonUtil;
+
+use mdk_core::messages::MessageProcessingResult;
+use mdk_storage_traits::GroupId;
+
+// Import helper functions from other modules
+use super::controller_bridge::{decode_hex, with_identity};
+use super::identity::js_error;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ProcessedWrapper {
+    kind: String,
+    message: Option<DecryptedMessage>,
+    proposal: Option<ProposalEnvelope>,
+    commit: Option<CommitEnvelope>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DecryptedMessage {
+    content: String,
+    author: String,
+    created_at: u64,
+    event: JsonValue,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ProposalEnvelope {
+    proposal_type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CommitEnvelope {
+    event: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SelfUpdateResult {
+    wrapper: String,
+    evolution_event: String,
+    welcome: Vec<String>,
+}
+
 #[wasm_bindgen]
 pub fn ingest_wrapper(identity_id: u32, wrapper: Uint8Array) -> Result<JsValue, JsValue> {
     with_identity(identity_id, |identity| {
@@ -67,8 +117,10 @@ pub fn self_update(identity_id: u32, group_id_hex: String) -> Result<JsValue, Js
 
         let welcome = update
             .welcome_rumors
-            .map(|rumors| rumors.iter().map(|r| r.as_json()).collect());
+            .map(|rumors| rumors.iter().map(|r| r.as_json()).collect())
+            .unwrap_or_default();
         let resp = SelfUpdateResult {
+            wrapper: update.evolution_event.as_json(),
             evolution_event: update.evolution_event.as_json(),
             welcome,
         };

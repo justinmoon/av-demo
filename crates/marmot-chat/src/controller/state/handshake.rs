@@ -1,3 +1,18 @@
+use anyhow::{anyhow, Context, Result};
+use futures::channel::mpsc::UnboundedSender;
+use log::{debug, info};
+
+use nostr::prelude::*;
+
+use crate::controller::events::{ChatEvent, HandshakePhase, SessionRole};
+use crate::controller::services::{
+    GroupArtifacts, HandshakeConnectParams, HandshakeListener, HandshakeMessage,
+    HandshakeMessageBody, HandshakeMessageType, KeyPackageExport,
+};
+
+use super::core::{ControllerState, HandshakeState, Operation, PendingInvite};
+use super::utils::{relay_relays_url, schedule, short_key};
+
 impl ControllerState {
     pub fn request_invite(
         &mut self,
@@ -403,46 +418,4 @@ impl ControllerState {
             _ => Ok(()),
         }
     }
-}
-
-fn now_timestamp() -> u64 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        (js_sys::Date::now() / 1000.0) as u64
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    }
-}
-
-fn schedule(tx: &UnboundedSender<Operation>, op: Operation) {
-    if let Err(err) = tx.unbounded_send(op) {
-        log::error!("operation queue closed: {err}");
-    }
-}
-
-fn short_key(key: &str) -> String {
-    if key.len() <= 12 {
-        key.to_string()
-    } else {
-        format!("{}…{}", &key[..6], &key[key.len() - 4..])
-    }
-}
-
-fn relay_relays_url(url: &str) -> String {
-    url.parse::<url::Url>()
-        .map(|parsed| {
-            let scheme = if parsed.scheme() == "https" {
-                "wss"
-            } else {
-                "wss"
-            };
-            format!("{scheme}://{}", parsed.host_str().unwrap_or("localhost"))
-        })
-        .unwrap_or_else(|_| "wss://localhost".to_string())
 }

@@ -22,6 +22,9 @@ use crate::controller::services::{
     HandshakeMessageType, IdentityService, MoqListener, MoqService, NostrService,
 };
 use crate::controller::{ChatController, ControllerConfig};
+
+use super::moq_bridge::JsMoqService;
+use super::nostr_client::JsNostrService;
 use mdk_core::{groups::NostrGroupConfigData, messages::MessageProcessingResult, MDK};
 use mdk_memory_storage::MdkMemoryStorage;
 use mdk_storage_traits::{groups::types::Group, GroupId};
@@ -31,8 +34,8 @@ use nostr::{JsonUtil, TagKind};
 use openmls::prelude::{KeyPackageBundle, OpenMlsProvider};
 use openmls_traits::storage::StorageProvider;
 
-const HANDSHAKE_KIND: u16 = 44501;
-const MOQ_BRIDGE_KEY: &str = "__MARMOT_MOQ__";
+pub(super) const HANDSHAKE_KIND: u16 = 44501;
+pub(super) const MOQ_BRIDGE_KEY: &str = "__MARMOT_MOQ__";
 
 #[cfg(feature = "panic-hook")]
 use console_error_panic_hook::set_once;
@@ -112,7 +115,7 @@ impl WasmChatController {
     }
 }
 
-fn js_error<E: ToString>(err: E) -> JsValue {
+pub(super) fn js_error<E: ToString>(err: E) -> JsValue {
     swb::to_value(&JsErrorPayload {
         error: err.to_string(),
     })
