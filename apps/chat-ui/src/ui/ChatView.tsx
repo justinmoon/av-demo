@@ -1,8 +1,10 @@
-import { createEffect, createSignal, onCleanup } from 'solid-js';
+import { createEffect, createSignal, createMemo, onCleanup } from 'solid-js';
 import { createStore } from 'solid-js/store';
-import { For } from 'solid-js';
-import type { ChatSession, ChatMessage, ChatState, ChatMember } from '../types';
+import { For, Show } from 'solid-js';
+import { getPublicKey } from 'nostr-tools';
+import type { ChatSession, ChatMessage, ChatState } from '../types';
 import type { ChatHandle, ChatCallbacks } from '../chat/controller';
+import { hexToBytes, normalizeHex } from '../utils';
 
 export interface ChatViewProps {
   session: ChatSession;
@@ -17,10 +19,31 @@ export function ChatView(props: ChatViewProps) {
   const [chatState, setChatState] = createStore<ChatState>({ messages: [], commits: 0, members: [] });
   const [ready, setReady] = createSignal(false);
   const [sending, setSending] = createSignal(false);
+  const [invitePubkey, setInvitePubkey] = createSignal('');
+  const [inviteAdmin, setInviteAdmin] = createSignal(false);
+  const [inviteError, setInviteError] = createSignal('');
 
   let controller: ChatHandle | null = null;
   let runId = 0;
   let messageInput: HTMLTextAreaElement | undefined;
+
+  const selfPubkey = createMemo(() => {
+    try {
+      return getPublicKey(hexToBytes(props.session.secretHex));
+    } catch (err) {
+      console.warn('Failed to derive self pubkey', err);
+      return '';
+    }
+  });
+
+  const isAdmin = createMemo(() => {
+    if (props.session.role === 'initial') {
+      return true;
+    }
+    const me = selfPubkey();
+    if (!me) return false;
+    return chatState.members.some((member) => member.pubkey === me && member.isAdmin);
+  });
 
   const syncWindowState = () => {
     if (typeof window === 'undefined') {
@@ -149,6 +172,20 @@ export function ChatView(props: ChatViewProps) {
     }
   };
 
+  const handleInviteSubmit = async (event: Event) => {
+    event.preventDefault();
+    if (!controller) return;
+    try {
+      const normalized = normalizeHex(invitePubkey(), 'Pubkey');
+      controller.invite(normalized, inviteAdmin());
+      setInvitePubkey('');
+      setInviteAdmin(false);
+      setInviteError('');
+    } catch (err) {
+      setInviteError((err as Error).message);
+    }
+  };
+
   return (
     <main class="chat-app" id="chat-view-root">
       <header class="chat-app__header">
@@ -211,6 +248,35 @@ export function ChatView(props: ChatViewProps) {
           </For>
         </ul>
       </section>
+
+      <Show when={isAdmin()}>
+        <section class="chat-app__invite" id="invite">
+          <h2>Add Participant</h2>
+          <form onSubmit={handleInviteSubmit} autocomplete="off">
+            <label for="invite-pubkey">Participant pubkey (hex)</label>
+            <input
+              id="invite-pubkey"
+              data-testid="invite-pubkey"
+              value={invitePubkey()}
+              onInput={(event) => setInvitePubkey(event.currentTarget.value)}
+              placeholder="64 hex characters"
+            />
+            <label class="invite-admin">
+              <input
+                type="checkbox"
+                data-testid="invite-admin"
+                checked={inviteAdmin()}
+                onChange={(event) => setInviteAdmin(event.currentTarget.checked)}
+              />
+              Grant admin
+            </label>
+            <Show when={inviteError()}>{(err) => <div class="form-error">{err()}</div>}</Show>
+            <button type="submit" data-testid="invite-submit" disabled={sending()}>
+              Request invite
+            </button>
+          </form>
+        </section>
+      </Show>
 
       <footer class="chat-app__footer">
         <form id="composer" autocomplete="off" onSubmit={handleSubmit}>

@@ -406,6 +406,10 @@ impl HandshakeMessageType {
 #[derive(Debug, Clone)]
 pub enum HandshakeMessageBody {
     None,
+    Request {
+        pubkey: Option<String>,
+        is_admin: Option<bool>,
+    },
     KeyPackage {
         event: String,
         bundle: Option<String>,

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use futures::channel::mpsc::UnboundedSender;
 
 use crate::controller::events::{
@@ -12,6 +12,7 @@ use crate::controller::services::{
     HandshakeMessageBody, HandshakeMessageType, IdentityHandle, KeyPackageExport, MoqService,
     NostrService,
 };
+use nostr::{prelude::FromBech32, PublicKey};
 
 pub type EventCallback = Rc<dyn Fn(ChatEvent)>;
 
@@ -38,12 +39,18 @@ pub struct ControllerState {
     pub members: BTreeMap<String, MemberRecord>,
     pub admin_pubkeys: BTreeSet<String>,
     pub peer_pubkeys: BTreeSet<String>,
+    pub pending_invites: BTreeMap<String, PendingInvite>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MemberRecord {
     pub info: MemberInfo,
     pub joined: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingInvite {
+    pub is_admin: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -59,9 +66,10 @@ pub enum Operation {
     Shutdown,
     SendText(String),
     RotateEpoch,
+    InviteMember { pubkey: String, is_admin: bool },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HandshakeState {
     WaitingForKeyPackage,
     WaitingForWelcome,
@@ -123,6 +131,7 @@ impl ControllerState {
             members,
             admin_pubkeys,
             peer_pubkeys,
+            pending_invites: BTreeMap::new(),
         }
     }
 
@@ -301,6 +310,124 @@ impl ControllerState {
         }
     }
 
+    pub fn request_invite(
+        &mut self,
+        tx: &UnboundedSender<Operation>,
+        pubkey_input: String,
+        is_admin: bool,
+    ) -> Result<()> {
+        let trimmed = pubkey_input.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("pubkey required"));
+        }
+
+        let parsed_pk = PublicKey::from_hex(trimmed)
+            .or_else(|_| PublicKey::from_bech32(trimmed))
+            .context("parse invite pubkey")?;
+        let pubkey = parsed_pk.to_hex();
+
+        if pubkey == self.identity.public_key_hex() {
+            return Err(anyhow!("cannot invite self"));
+        }
+
+        if self
+            .members
+            .get(&pubkey)
+            .map(|member| member.joined)
+            .unwrap_or(false)
+        {
+            return Err(anyhow!("member already present"));
+        }
+
+        if self.pending_invites.contains_key(&pubkey) {
+            return Err(anyhow!("invite already pending"));
+        }
+
+        self.peer_pubkeys.insert(pubkey.clone());
+        self.pending_invites
+            .insert(pubkey.clone(), PendingInvite { is_admin });
+
+        if is_admin {
+            self.update_member_admin(&pubkey, true);
+        }
+
+        self.ensure_member(&pubkey);
+
+        self.emit_status(format!(
+            "Requesting key package from {}",
+            short_key(&pubkey)
+        ));
+
+        schedule(
+            tx,
+            Operation::OutgoingHandshake(HandshakeMessage {
+                message_type: HandshakeMessageType::RequestKeyPackage,
+                data: HandshakeMessageBody::Request {
+                    pubkey: Some(pubkey.clone()),
+                    is_admin: Some(is_admin),
+                },
+            }),
+        );
+
+        Ok(())
+    }
+
+    fn handle_member_addition(
+        &mut self,
+        tx: &UnboundedSender<Operation>,
+        invitee_pub: String,
+        event_json: String,
+        _bundle: Option<String>,
+    ) -> Result<()> {
+        let requested_admin = self
+            .pending_invites
+            .remove(&invitee_pub)
+            .map(|invite| invite.is_admin)
+            .unwrap_or(false);
+
+        if requested_admin {
+            self.update_member_admin(&invitee_pub, true);
+        }
+
+        self.peer_pubkeys.insert(invitee_pub.clone());
+        self.ensure_member(&invitee_pub);
+
+        let artifacts = self
+            .identity
+            .add_members(&[event_json.clone()])
+            .map_err(|err| anyhow!("add members failed: {err}"))?;
+
+        self.commits += 1;
+
+        schedule(
+            tx,
+            Operation::PublishWrapper(artifacts.commit.bytes.clone()),
+        );
+
+        let group_hex = self.identity.group_id_hex().unwrap_or_default();
+        for welcome in artifacts.welcomes {
+            schedule(
+                tx,
+                Operation::OutgoingHandshake(HandshakeMessage {
+                    message_type: HandshakeMessageType::Welcome,
+                    data: HandshakeMessageBody::Welcome {
+                        welcome: welcome.welcome.clone(),
+                        group_id_hex: Some(group_hex.clone()),
+                    },
+                }),
+            );
+            (self.callback)(ChatEvent::InviteGenerated {
+                welcome: welcome.welcome,
+                recipient: welcome.recipient.clone(),
+                is_admin: self.admin_pubkeys.contains(&welcome.recipient),
+            });
+        }
+
+        self.emit_status(format!("Sent welcome to {}", short_key(&invitee_pub)));
+
+        Ok(())
+    }
+
     pub fn on_start(
         &mut self,
         tx: &UnboundedSender<Operation>,
@@ -323,7 +450,10 @@ impl ControllerState {
                     tx,
                     Operation::OutgoingHandshake(HandshakeMessage {
                         message_type: HandshakeMessageType::RequestKeyPackage,
-                        data: HandshakeMessageBody::None,
+                        data: HandshakeMessageBody::Request {
+                            pubkey: self.session.peer_pubkeys.get(0).cloned(),
+                            is_admin: None,
+                        },
                     }),
                 );
             }
@@ -393,9 +523,16 @@ impl ControllerState {
                     } => (event, bundle, pubkey),
                     _ => return Err(anyhow!("missing key package payload")),
                 };
-                let invitee_pub = pubkey
-                    .or_else(|| self.session.peer_pubkeys.first().cloned())
-                    .ok_or_else(|| anyhow!("invitee pubkey missing"))?;
+                let invitee_pub =
+                    match pubkey.or_else(|| self.session.peer_pubkeys.first().cloned()) {
+                        Some(key) => key,
+                        None => return Err(anyhow!("invitee pubkey missing")),
+                    };
+
+                if self.handshake == HandshakeState::Established {
+                    return self.handle_member_addition(tx, invitee_pub, event, bundle);
+                }
+
                 self.peer_pubkeys.insert(invitee_pub.clone());
                 self.ensure_member(&invitee_pub);
                 if self.admin_pubkeys.contains(&invitee_pub) {
@@ -542,6 +679,14 @@ fn now_timestamp() -> u64 {
 fn schedule(tx: &UnboundedSender<Operation>, op: Operation) {
     if let Err(err) = tx.unbounded_send(op) {
         log::error!("operation queue closed: {err}");
+    }
+}
+
+fn short_key(key: &str) -> String {
+    if key.len() <= 12 {
+        key.to_string()
+    } else {
+        format!("{}…{}", &key[..6], &key[key.len() - 4..])
     }
 }
 

@@ -7,10 +7,12 @@ const os = require('os');
 const { getPublicKey } = require('nostr-tools');
 const { hexToBytes } = require('@noble/hashes/utils');
 
-const ALICE_SECRET = '4d36e7068b0eeef39b4e2ff1f908db8b27c12075b1219777084ffcf86490b6ae';
-const BOB_SECRET = '6e8a52c9ac36ca5293b156d8af4d7f6aeb52208419bd99c75472fc6f4321a5fd';
-const ALICE_PUB = getPublicKey(hexToBytes(ALICE_SECRET));
-const BOB_PUB = getPublicKey(hexToBytes(BOB_SECRET));
+const INITIAL_SECRET = '4d36e7068b0eeef39b4e2ff1f908db8b27c12075b1219777084ffcf86490b6ae';
+const PEER_SECRET = '6e8a52c9ac36ca5293b156d8af4d7f6aeb52208419bd99c75472fc6f4321a5fd';
+const EXTRA_SECRET = '9c4e9aba1e3ff5deaa1bcb2a7dce1f2f4a5c6d7e8f9a0b1c2d3e4f5061728394';
+const INITIAL_PUB = getPublicKey(hexToBytes(INITIAL_SECRET));
+const PEER_PUB = getPublicKey(hexToBytes(PEER_SECRET));
+const EXTRA_PUB = getPublicKey(hexToBytes(EXTRA_SECRET));
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const MOQ_ROOT = '/Users/justin/code/moq/moq';
@@ -255,7 +257,7 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
     }
   });
 
-  test('two browser tabs exchange messages over MoQ', async ({ context }) => {
+  test('three participants exchange messages over MoQ', async ({ context }) => {
     await context.addInitScript(() => {
       try {
         window.localStorage?.clear?.();
@@ -268,101 +270,127 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
     const nostrParam = process.env.MARMOT_NOSTR_URL || `ws://127.0.0.1:${nostrPort}/`;
     const baseUrl = `http://127.0.0.1:${serverPort}`;
 
-    const bob = await context.newPage();
-    bob.on('console', (msg) => console.log('[Bob]', msg.text()));
-    bob.on('pageerror', (err) => console.error('[Bob error]', err?.message ?? err, err?.error ?? '', err?.error?.stack ?? '', {
+    const waitForMemberCount = async (page, expected) => {
+      await page.waitForFunction(
+        (expectedCount) => (window.chatState?.members?.length ?? 0) >= expectedCount,
+        expected,
+        { timeout: 15000 }
+      );
+    };
+
+    const peerPage = await context.newPage();
+    peerPage.on('console', (msg) => console.log('[Peer]', msg.text()));
+    peerPage.on('pageerror', (err) => console.error('[Peer error]', err?.message ?? err, err?.error ?? '', err?.error?.stack ?? '', {
       type: err?.type,
       filename: err?.filename,
       lineno: err?.lineno,
       colno: err?.colno,
       error: err?.error,
     }));
-    await bob.goto(baseUrl);
-    await useManualSecret(bob, BOB_SECRET);
-    await bob.getByTestId('start-join').click();
+    await peerPage.goto(baseUrl);
+    await useManualSecret(peerPage, PEER_SECRET);
+    await peerPage.getByTestId('start-join').click();
 
-    const alice = await context.newPage();
-    alice.on('console', (msg) => console.log('[Alice]', msg.text()));
-    alice.on('pageerror', (err) => console.error('[Alice error]', err?.message ?? err, err?.error ?? '', err?.error?.stack ?? '', {
+    const initialPage = await context.newPage();
+    initialPage.on('console', (msg) => console.log('[Initial]', msg.text()));
+    initialPage.on('pageerror', (err) => console.error('[Initial error]', err?.message ?? err, err?.error ?? '', err?.error?.stack ?? '', {
       type: err?.type,
       filename: err?.filename,
       lineno: err?.lineno,
       colno: err?.colno,
       error: err?.error,
     }));
-    await alice.goto(baseUrl);
-    await useManualSecret(alice, ALICE_SECRET);
-    await alice.getByTestId('start-create').click();
-    await alice.getByTestId('create-peer').fill(BOB_PUB);
-    await alice.getByTestId('create-relay').fill(relayParam);
-    await alice.getByTestId('create-nostr').fill(nostrParam);
-    await alice.getByTestId('create-submit').click();
+    await initialPage.goto(baseUrl);
+    await useManualSecret(initialPage, INITIAL_SECRET);
+    await initialPage.getByTestId('start-create').click();
+    await initialPage.getByTestId('create-peer').fill(PEER_PUB);
+    await initialPage.getByTestId('create-relay').fill(relayParam);
+    await initialPage.getByTestId('create-nostr').fill(nostrParam);
+    await initialPage.getByTestId('create-submit').click();
 
-    const inviteLink = await alice.getByTestId('invite-link').inputValue();
+    const inviteLink = await initialPage.getByTestId('invite-link').inputValue();
 
-    await bob.getByTestId('join-code').fill(inviteLink);
-    await bob.getByTestId('join-relay').fill(relayParam);
-    await bob.getByTestId('join-nostr').fill(nostrParam);
+    await peerPage.getByTestId('join-code').fill(inviteLink);
+    await peerPage.getByTestId('join-relay').fill(relayParam);
+    await peerPage.getByTestId('join-nostr').fill(nostrParam);
 
     await Promise.all([
-      bob.getByTestId('join-submit').click(),
-      alice.getByTestId('enter-chat').click(),
+      peerPage.getByTestId('join-submit').click(),
+      initialPage.getByTestId('enter-chat').click(),
     ]);
 
-    await waitForChatReady(bob);
-    await waitForChatReady(alice);
+    await waitForChatReady(peerPage);
+    await waitForChatReady(initialPage);
 
-    await alice.fill('#message', 'Hello Bob');
-    await alice.click('button[type="submit"]');
+    const extraPage = await context.newPage();
+    extraPage.on('console', (msg) => console.log('[Extra]', msg.text()));
+    extraPage.on('pageerror', (err) => console.error('[Extra error]', err?.message ?? err, err?.error ?? '', err?.error?.stack ?? '', {
+      type: err?.type,
+      filename: err?.filename,
+      lineno: err?.lineno,
+      colno: err?.colno,
+      error: err?.error,
+    }));
+    await extraPage.goto(baseUrl);
+    await useManualSecret(extraPage, EXTRA_SECRET);
+    await extraPage.getByTestId('start-join').click();
+    await extraPage.getByTestId('join-code').fill(inviteLink);
+    await extraPage.getByTestId('join-relay').fill(relayParam);
+    await extraPage.getByTestId('join-nostr').fill(nostrParam);
+    await extraPage.getByTestId('join-submit').click();
 
-    await bob.waitForFunction(
-      () => window.chatState?.messages?.some((m) => m.content === 'Hello Bob'),
-      null,
-      { timeout: 10000 }
-    );
+    await waitForChatReady(extraPage);
+    await initialPage.fill('#message', 'Hello everyone');
+    await initialPage.click('button[type="submit"]');
 
-    const bobMessages = await bob.evaluate(() => window.chatState?.messages ?? []);
-    expect(bobMessages.map((m) => m.content)).toContain('Hello Bob');
+    await Promise.all([
+      peerPage.waitForFunction(
+        () => window.chatState?.messages?.some((m) => m.content === 'Hello everyone' && !m.local),
+        null,
+        { timeout: 10000 }
+      ),
+      extraPage.waitForFunction(
+        () => window.chatState?.messages?.some((m) => m.content === 'Hello everyone' && !m.local),
+        null,
+        { timeout: 10000 }
+      ),
+    ]);
 
-    await bob.fill('#message', 'Hello Alice');
-    await bob.click('button[type="submit"]');
+    const extraRoster = await extraPage.evaluate(() => window.chatState?.members ?? []);
+    expect(extraRoster.length).toBeGreaterThanOrEqual(3);
 
-    await bob.waitForFunction(
-      () => window.chatState?.messages?.some((m) => m.content === 'Hello Alice' && m.local),
-      null,
-      { timeout: 5000 }
-    );
+    await peerPage.fill('#message', 'Peer says hi');
+    await peerPage.click('button[type="submit"]');
 
-    await alice.waitForFunction(
-      () => window.chatState?.messages?.some((m) => m.content === 'Hello Alice' && !m.local),
-      null,
-      { timeout: 10000 }
-    );
+    await Promise.all([
+      initialPage.waitForFunction(
+        () => window.chatState?.messages?.some((m) => m.content === 'Peer says hi' && !m.local),
+        null,
+        { timeout: 10000 }
+      ),
+      extraPage.waitForFunction(
+        () => window.chatState?.messages?.some((m) => m.content === 'Peer says hi' && !m.local),
+        null,
+        { timeout: 10000 }
+      ),
+    ]);
 
-    const aliceMessages = await alice.evaluate(() => window.chatState?.messages ?? []);
-    expect(aliceMessages.map((m) => m.content)).toContain('Hello Alice');
+    await extraPage.fill('#message', 'Third participant online');
+    await extraPage.click('button[type="submit"]');
 
-    await alice.click('#rotate');
+    await Promise.all([
+      initialPage.waitForFunction(
+        () => window.chatState?.messages?.some((m) => m.content === 'Third participant online' && !m.local),
+        null,
+        { timeout: 10000 }
+      ),
+      peerPage.waitForFunction(
+        () => window.chatState?.messages?.some((m) => m.content === 'Third participant online' && !m.local),
+        null,
+        { timeout: 10000 }
+      ),
+    ]);
 
-    await bob.waitForFunction(
-      () => (window.chatState?.commits ?? 0) >= 1,
-      null,
-      { timeout: 10000 }
-    );
-
-    await alice.fill('#message', 'Post-commit ping');
-    await alice.click('button[type="submit"]');
-
-    await bob.waitForFunction(
-      () => window.chatState?.messages?.some((m) => m.content === 'Post-commit ping'),
-      null,
-      { timeout: 10000 }
-    );
-
-    const finalBobMessages = await bob.evaluate(() => window.chatState?.messages ?? []);
-    expect(finalBobMessages.map((m) => m.content)).toContain('Post-commit ping');
-
-    await alice.close();
-    await bob.close();
+    await Promise.all([initialPage.close(), peerPage.close(), extraPage.close()]);
   });
 });

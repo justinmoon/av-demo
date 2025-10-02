@@ -47,6 +47,12 @@ impl ChatController {
     pub fn shutdown(&self) {
         let _ = self.op_tx.unbounded_send(Operation::Shutdown);
     }
+
+    pub fn invite_member(&self, pubkey: String, is_admin: bool) {
+        let _ = self
+            .op_tx
+            .unbounded_send(Operation::InviteMember { pubkey, is_admin });
+    }
 }
 
 struct ChatRuntime {
@@ -164,6 +170,15 @@ impl ChatRuntime {
                         }
                     }
                     Err(err) => self.emit_error(err),
+                }
+            }
+            Operation::InviteMember { pubkey, is_admin } => {
+                if let Err(err) =
+                    self.state
+                        .borrow_mut()
+                        .request_invite(&self.op_tx, pubkey, is_admin)
+                {
+                    self.emit_error(err);
                 }
             }
             Operation::Shutdown => {

@@ -104,6 +104,11 @@ impl WasmChatController {
     pub fn shutdown(&self) {
         self.controller.shutdown();
     }
+
+    #[wasm_bindgen(js_name = inviteMember)]
+    pub fn invite_member(&self, pubkey: String, is_admin: bool) {
+        self.controller.invite_member(pubkey, is_admin);
+    }
 }
 
 fn js_error<E: ToString>(err: E) -> JsValue {
@@ -430,6 +435,16 @@ fn handshake_payload(session: &str, role: SessionRole, message: &HandshakeMessag
     });
     match &message.data {
         HandshakeMessageBody::None => {}
+        HandshakeMessageBody::Request { pubkey, is_admin } => {
+            if let Some(obj) = base.as_object_mut() {
+                if let Some(pubkey) = pubkey {
+                    obj.insert("pubkey".to_string(), json!(pubkey));
+                }
+                if let Some(is_admin) = is_admin {
+                    obj.insert("isAdmin".to_string(), json!(is_admin));
+                }
+            }
+        }
         HandshakeMessageBody::KeyPackage {
             event,
             bundle,
@@ -465,7 +480,12 @@ fn handshake_from_payload(payload: &JsonValue) -> Option<HandshakeMessage> {
     let message_type = HandshakeMessageType::from_str(ty)?;
     let data = match message_type {
         HandshakeMessageType::RequestKeyPackage | HandshakeMessageType::RequestWelcome => {
-            HandshakeMessageBody::None
+            let pubkey = payload
+                .get("pubkey")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let is_admin = payload.get("isAdmin").and_then(|v| v.as_bool());
+            HandshakeMessageBody::Request { pubkey, is_admin }
         }
         HandshakeMessageType::KeyPackage => {
             let event = payload.get("event")?.as_str()?.to_string();

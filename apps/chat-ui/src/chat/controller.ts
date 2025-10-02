@@ -16,6 +16,7 @@ export interface ChatHandle {
   stop(): void;
   sendMessage(content: string): void;
   rotate(): void;
+  invite(pubkey: string, isAdmin: boolean): void;
 }
 
 interface ReadyState {
@@ -127,5 +128,6 @@ export async function startChat(session: ChatSession, callbacks: ChatCallbacks):
     stop: () => controller.shutdown(),
     sendMessage: (content: string) => controller.send_message(content),
     rotate: () => controller.rotate_epoch(),
+    invite: (pubkey: string, isAdmin: boolean) => controller.inviteMember(pubkey, isAdmin),
   };
 }
