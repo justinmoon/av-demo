@@ -33,8 +33,6 @@ pub(super) fn short_key(key: &str) -> String {
 
 pub(super) fn relay_relays_url(url: &str) -> String {
     url.parse::<url::Url>()
-        .map(|parsed| {
-            format!("wss://{}", parsed.host_str().unwrap_or("localhost"))
-        })
+        .map(|parsed| format!("wss://{}", parsed.host_str().unwrap_or("localhost")))
         .unwrap_or_else(|_| "wss://localhost".to_string())
 }

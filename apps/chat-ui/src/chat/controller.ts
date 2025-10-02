@@ -2,6 +2,14 @@ import initWasm, { WasmChatController } from '../../../../tests/pkg/marmot_chat.
 import type { ChatMember, ChatMessage, ChatSession } from '../types';
 import { createMoqBridge } from '../bridge/moq';
 
+export type RecoveryAction = 'retry' | 'refresh' | 'check_connection' | 'none';
+
+export interface ErrorInfo {
+  message: string;
+  fatal: boolean;
+  recoveryAction?: RecoveryAction;
+}
+
 export interface ChatCallbacks {
   setStatus(text: string): void;
   pushMessage(message: ChatMessage): void;
@@ -10,6 +18,8 @@ export interface ChatCallbacks {
   setRoster(members: ChatMember[]): void;
   upsertMember(member: ChatMember): void;
   removeMember(pubkey: string): void;
+  showError(error: ErrorInfo): void;
+  clearError(): void;
 }
 
 export interface ChatHandle {
@@ -53,6 +63,7 @@ export async function startChat(session: ChatSession, callbacks: ChatCallbacks):
         callbacks.setStatus(event.text ?? '');
         break;
       case 'ready':
+        callbacks.clearError();
         callbacks.setReady(Boolean((event as ReadyState).ready));
         break;
       case 'message': {
@@ -99,10 +110,22 @@ export async function startChat(session: ChatSession, callbacks: ChatCallbacks):
         callbacks.setStatus(`Invite ready for ${recipient} (${adminFlag})`);
         break;
       }
-      case 'error':
-        callbacks.setStatus(`Error: ${String(event.message ?? 'unknown')}`);
-        callbacks.setReady(false);
+      case 'error': {
+        const errorEvent = event as { message: string; fatal?: boolean; recovery_action?: RecoveryAction };
+        const fatal = errorEvent.fatal !== false; // Default to true if undefined
+        const recoveryAction = errorEvent.recovery_action;
+
+        callbacks.showError({
+          message: errorEvent.message ?? 'Unknown error',
+          fatal,
+          recoveryAction,
+        });
+
+        if (fatal) {
+          callbacks.setReady(false);
+        }
         break;
+      }
       case 'handshake':
         callbacks.setStatus(`Handshake: ${event.phase ?? 'unknown'}`);
         break;

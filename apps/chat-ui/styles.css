@@ -41,6 +41,37 @@ body {
   color: #8be9fd;
 }
 
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.status-banner--error {
+  margin-top: 0.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: rgba(244, 67, 54, 0.12);
+  border: 1px solid rgba(244, 67, 54, 0.4);
+  color: #ff8a80;
+}
+
+.status-banner--error button {
+  border: 1px solid rgba(244, 67, 54, 0.45);
+  background: rgba(244, 67, 54, 0.2);
+  color: #ff8a80;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.status-banner--error button:hover {
+  background: rgba(244, 67, 54, 0.35);
+}
+
 .info {
   display: flex;
   gap: 1rem;
@@ -323,4 +354,88 @@ body {
   border: 1px solid rgba(80, 250, 123, 0.4);
   color: #a8f5bc;
   font-size: 0.85rem;
+}
+
+/* Error Banner */
+.error-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.error-banner--warning {
+  background: rgba(255, 193, 7, 0.15);
+  border-color: rgba(255, 193, 7, 0.4);
+  color: #ffca28;
+}
+
+.error-banner--error {
+  background: rgba(255, 82, 82, 0.15);
+  border-color: rgba(255, 82, 82, 0.4);
+  color: #ff9999;
+}
+
+.error-banner--critical {
+  background: rgba(220, 38, 38, 0.2);
+  border-color: rgba(220, 38, 38, 0.6);
+  color: #fca5a5;
+}
+
+.error-banner__content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.error-banner__title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.error-banner__message {
+  margin: 0;
+  font-size: 0.875rem;
+  opacity: 0.95;
+}
+
+.error-banner__recovery {
+  margin: 0;
+  font-size: 0.8125rem;
+  opacity: 0.85;
+  font-style: italic;
+}
+
+.error-banner__dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 1rem;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.error-banner__dismiss:hover {
+  opacity: 1;
 }

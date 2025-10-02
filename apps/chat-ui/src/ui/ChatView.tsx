@@ -3,7 +3,7 @@ import { createStore } from 'solid-js/store';
 import { For, Show } from 'solid-js';
 import { getPublicKey } from 'nostr-tools';
 import type { ChatSession, ChatMessage, ChatState } from '../types';
-import type { ChatHandle, ChatCallbacks } from '../chat/controller';
+import type { ChatHandle, ChatCallbacks, ErrorInfo } from '../chat/controller';
 import { hexToBytes, normalizeHex } from '../utils';
 
 export interface ChatViewProps {
@@ -22,6 +22,7 @@ export function ChatView(props: ChatViewProps) {
   const [inviteAdmin, setInviteAdmin] = createSignal(false);
   const [inviteError, setInviteError] = createSignal('');
   const [inviteSuccess, setInviteSuccess] = createSignal('');
+  const [currentError, setCurrentError] = createSignal<ErrorInfo | null>(null);
 
   let controller: ChatHandle | null = null;
   let runId = 0;
@@ -57,6 +58,7 @@ export function ChatView(props: ChatViewProps) {
     (window as any).chatState = snapshot;
     (window as any).chatReady = ready();
     (window as any).chatStatus = status();
+    (window as any).chatError = currentError()?.message ?? '';
   };
 
   createEffect(syncWindowState);
@@ -90,6 +92,18 @@ export function ChatView(props: ChatViewProps) {
     removeMember: (pubkey) => {
       setChatState('members', (current) => current.filter((member) => member.pubkey !== pubkey));
     },
+    showError: (error) => {
+      setCurrentError(error);
+      if (!error.fatal) {
+        // Auto-dismiss non-fatal errors after 5 seconds
+        setTimeout(() => {
+          if (currentError()?.message === error.message && !currentError()?.fatal) {
+            setCurrentError(null);
+          }
+        }, 5000);
+      }
+    },
+    clearError: () => setCurrentError(null),
   };
 
   const stopController = () => {
@@ -112,6 +126,7 @@ export function ChatView(props: ChatViewProps) {
     setStatus('Initializing…');
     setChatState({ messages: [], commits: 0, members: [] });
     setReady(false);
+    setCurrentError(null);
     if (messageInput) {
       messageInput.value = '';
     }
@@ -188,6 +203,25 @@ export function ChatView(props: ChatViewProps) {
     }
   };
 
+  const formatRole = (role: string) => {
+    return role === 'initial' ? 'Creator' : 'Invitee';
+  };
+
+  const getRecoveryMessage = (action?: string) => {
+    switch (action) {
+      case 'retry':
+        return 'Please try again.';
+      case 'refresh':
+        return 'Please refresh the page to restart the session.';
+      case 'check_connection':
+        return 'Please check your network connection.';
+      default:
+        return '';
+    }
+  };
+
+  const dismissError = () => setCurrentError(null);
+
   return (
     <main class="chat-app" id="chat-view-root">
       <header class="chat-app__header">
@@ -199,6 +233,33 @@ export function ChatView(props: ChatViewProps) {
           <span id="nostr">Nostr: {props.session.nostr}</span>
         </div>
       </header>
+
+      <Show when={currentError()}>
+        {(error) => (
+          <div
+            class={`error-banner error-banner--${error().fatal ? 'error' : 'warning'}`}
+            role="alert"
+            aria-live="assertive"
+          >
+            <div class="error-banner__content">
+              <strong class="error-banner__title">
+                {error().fatal ? 'Error' : 'Warning'}
+              </strong>
+              <p class="error-banner__message">{error().message}</p>
+              <Show when={error().recoveryAction && getRecoveryMessage(error().recoveryAction)}>
+                {(msg) => <p class="error-banner__recovery">{msg()}</p>}
+              </Show>
+            </div>
+            <button
+              class="error-banner__dismiss"
+              onClick={dismissError}
+              aria-label="Dismiss error"
+            >
+              ×
+            </button>
+          </div>
+        )}
+      </Show>
 
       <section class="chat-app__messages" id="messages" aria-live="polite">
         <For each={chatState.messages}>
@@ -282,10 +343,15 @@ export function ChatView(props: ChatViewProps) {
             required
             ref={(el) => (messageInput = el)}
           />
-          <button type="submit" id="send-message" disabled={sending() || !ready()}>
+          <button type="submit" id="send-message" disabled={sending() || !ready() || (currentError()?.fatal ?? false)}>
             Send
           </button>
-          <button type="button" id="rotate" onClick={handleRotate} disabled={sending() || !ready()}>
+          <button
+            type="button"
+            id="rotate"
+            onClick={handleRotate}
+            disabled={sending() || !ready() || (currentError()?.fatal ?? false)}
+          >
             Rotate Epoch
           </button>
         </form>

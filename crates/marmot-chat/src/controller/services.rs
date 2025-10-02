@@ -168,7 +168,8 @@ impl IdentityHandle {
             .create_group(&self.keys.public_key(), vec![invitee], config)
             .context("create group")?;
         let welcome = result
-            .welcome_rumors.first()
+            .welcome_rumors
+            .first()
             .ok_or_else(|| anyhow!("missing welcome rumor"))?
             .clone();
         let group_id = result.group.mls_group_id.clone();

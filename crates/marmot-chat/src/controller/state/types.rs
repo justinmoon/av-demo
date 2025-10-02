@@ -26,6 +26,7 @@ pub struct ControllerState {
     pub commits: u32,
     pub ready: bool,
     pub outgoing_queue: VecDeque<Vec<u8>>,
+    pub pending_incoming: VecDeque<PendingIncomingFrame>,
     pub key_package_cache: Option<KeyPackageExport>,
     pub welcome_json: Option<String>,
     pub members: BTreeMap<String, MemberRecord>,
@@ -44,6 +45,13 @@ pub struct MemberRecord {
 #[derive(Debug, Clone)]
 pub struct PendingInvite {
     pub is_admin: bool,
+}
+
+#[derive(Debug)]
+pub struct PendingIncomingFrame {
+    pub bytes: Vec<u8>,
+    pub attempts: u8,
+    pub last_error: String,
 }
 
 #[derive(Debug, Clone)]

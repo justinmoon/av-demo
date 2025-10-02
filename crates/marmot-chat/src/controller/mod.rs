@@ -1,3 +1,4 @@
+mod error;
 pub mod events;
 pub mod services;
 mod state;
@@ -7,7 +8,8 @@ pub use state::ControllerConfig;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use events::{ChatEvent, SessionParams};
+use error::{ControllerError, ErrorSeverity, ErrorStage};
+use events::{ChatEvent, RecoveryAction, SessionParams};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
 use state::{ControllerState, Operation};
@@ -86,7 +88,10 @@ impl ChatRuntime {
                     op_tx: self.op_tx.clone(),
                 });
                 if let Err(err) = self.state.borrow_mut().on_start(&self.op_tx, listener) {
-                    self.emit_error(err);
+                    self.emit_error(self.classify_handshake_error(
+                        err,
+                        "Handshake failed to start. Refresh the page or request a new invite.",
+                    ));
                 }
             }
             Operation::OutgoingHandshake(message) => {
@@ -98,7 +103,10 @@ impl ChatRuntime {
                     .borrow_mut()
                     .on_incoming_handshake(&self.op_tx, message)
                 {
-                    self.emit_error(err);
+                    self.emit_error(self.classify_handshake_error(
+                        err,
+                        "Handshake message failed. Refresh the page or request a new invite.",
+                    ));
                 }
             }
             Operation::ConnectMoq => {
@@ -124,7 +132,11 @@ impl ChatRuntime {
                             let _ = self.op_tx.unbounded_send(Operation::Emit(event));
                         }
                     }
-                    Err(err) => self.emit_error(err),
+                    Err(err) => self.emit_error(
+                        ControllerError::fatal(ErrorStage::Messaging, err).with_user_message(
+                            "Failed to process encrypted update. Refresh or request a new invite.",
+                        ),
+                    ),
                 }
             }
             Operation::PublishWrapper(bytes) => {
@@ -143,7 +155,11 @@ impl ChatRuntime {
                         let _ = self.op_tx.unbounded_send(Operation::PublishWrapper(bytes));
                         let _ = self.op_tx.unbounded_send(Operation::Emit(event));
                     }
-                    Err(err) => self.emit_error(err),
+                    Err(err) => self.emit_error(
+                        ControllerError::fatal(ErrorStage::Messaging, err).with_user_message(
+                            "Failed to send message. Refresh the page and try again.",
+                        ),
+                    ),
                 }
             }
             Operation::RotateEpoch => {
@@ -155,7 +171,11 @@ impl ChatRuntime {
                             let _ = self.op_tx.unbounded_send(Operation::Emit(event));
                         }
                     }
-                    Err(err) => self.emit_error(err),
+                    Err(err) => self.emit_error(
+                        ControllerError::fatal(ErrorStage::Messaging, err).with_user_message(
+                            "Epoch rotation failed. Refresh the page and try again.",
+                        ),
+                    ),
                 }
             }
             Operation::InviteMember { pubkey, is_admin } => {
@@ -164,7 +184,7 @@ impl ChatRuntime {
                         .borrow_mut()
                         .request_invite(&self.op_tx, pubkey, is_admin)
                 {
-                    self.emit_error(err);
+                    self.emit_error(self.classify_invite_error(err));
                 }
             }
             Operation::Shutdown => {
@@ -174,13 +194,93 @@ impl ChatRuntime {
         }
     }
 
-    fn emit_error(&self, err: anyhow::Error) {
-        let message = format!("{err:#}");
-        if self
-            .op_tx
-            .unbounded_send(Operation::Emit(ChatEvent::error(message.clone()))).is_ok()
-        {
-            log::error!("controller error: {message}");
+    fn classify_handshake_error(
+        &self,
+        err: anyhow::Error,
+        default_message: &'static str,
+    ) -> ControllerError {
+        let is_history_failure = err
+            .chain()
+            .any(|cause| cause.to_string().contains("incoming frame failed"));
+        if is_history_failure {
+            ControllerError::fatal(ErrorStage::Messaging, err).with_user_message(
+                "Failed to catch up on encrypted history. Refresh or request a new invite.",
+            )
+        } else {
+            ControllerError::fatal(ErrorStage::Handshake, err).with_user_message(default_message)
+        }
+    }
+
+    fn classify_invite_error(&self, err: anyhow::Error) -> ControllerError {
+        let message_text = err.to_string();
+        let lower = message_text.to_lowercase();
+
+        if lower.contains("pubkey required") {
+            ControllerError::transient(ErrorStage::Invite, err)
+                .with_user_message("Please enter a participant pubkey before requesting an invite.")
+                .with_recovery_action(RecoveryAction::None)
+        } else if lower.contains("parse invite pubkey") {
+            ControllerError::transient(ErrorStage::Invite, err)
+                .with_user_message("Invite pubkey is invalid. Use the participant's hex or npub key.")
+                .with_recovery_action(RecoveryAction::None)
+        } else if lower.contains("cannot invite self") {
+            ControllerError::transient(ErrorStage::Invite, err)
+                .with_user_message("You cannot invite your own key into the room.")
+                .with_recovery_action(RecoveryAction::None)
+        } else if lower.contains("member already present") {
+            ControllerError::transient(ErrorStage::Invite, err)
+                .with_user_message("That participant is already in the roster.")
+                .with_recovery_action(RecoveryAction::None)
+        } else if lower.contains("invite already pending") {
+            ControllerError::transient(ErrorStage::Invite, err)
+                .with_user_message("An invite for that participant is still pending approval.")
+                .with_recovery_action(RecoveryAction::None)
+        } else if lower.contains("relay") || lower.contains("nostr") {
+            ControllerError::fatal(ErrorStage::Invite, err)
+                .with_user_message("Failed to publish invite to relay. Check your connection.")
+                .with_recovery_action(RecoveryAction::CheckConnection)
+        } else {
+            ControllerError::fatal(ErrorStage::Invite, err)
+                .with_user_message("Invite failed. Verify the participant key and try again.")
+                .with_recovery_action(RecoveryAction::Retry)
+        }
+    }
+
+    fn emit_error(&self, err: ControllerError) {
+        let (severity, stage, message, recovery_action, detail) = err.into_parts();
+        match severity {
+            ErrorSeverity::Transient => {
+                if let Err(send_err) = self
+                    .op_tx
+                    .unbounded_send(Operation::Emit(ChatEvent::non_fatal_error(message.clone())))
+                {
+                    log::warn!(
+                        "controller transient {stage} error: {detail:#}; failed to emit non-fatal error: {send_err}"
+                    );
+                } else {
+                    log::warn!("controller transient {stage} error: {detail:#}");
+                }
+            }
+            ErrorSeverity::Fatal => {
+                let event = if let Some(action) = recovery_action {
+                    ChatEvent::error_with_recovery(message.clone(), action)
+                } else {
+                    ChatEvent::error(message.clone())
+                };
+                let send_result = self
+                    .op_tx
+                    .unbounded_send(Operation::Emit(event));
+                match send_result {
+                    Ok(()) => {
+                        log::error!("controller fatal {stage} error: {detail:#}");
+                    }
+                    Err(send_err) => {
+                        log::error!(
+                            "controller fatal {stage} error: {detail:#}; failed to emit error event: {send_err}"
+                        );
+                    }
+                }
+            }
         }
     }
 }

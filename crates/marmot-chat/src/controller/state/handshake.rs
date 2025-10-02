@@ -177,6 +177,8 @@ impl ControllerState {
             self.update_member_admin(&invitee_pub, true);
         }
 
+        self.flush_pending_incoming(tx)?;
+
         Ok(())
     }
 
@@ -291,6 +293,7 @@ impl ControllerState {
                 schedule(tx, Operation::ConnectMoq);
                 self.mark_member_joined(&self.identity.public_key_hex());
                 self.mark_member_joined(&invitee_pub);
+                self.flush_pending_incoming(tx)?;
                 Ok(())
             }
             HandshakeMessageType::RequestWelcome => {
@@ -388,6 +391,7 @@ impl ControllerState {
                         self.identity.group_id_hex().unwrap_or_default()
                     ))),
                 );
+                self.flush_pending_incoming(tx)?;
                 Ok(())
             }
             HandshakeMessageType::RequestKeyPackage => {

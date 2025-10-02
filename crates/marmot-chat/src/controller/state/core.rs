@@ -54,6 +54,7 @@ impl ControllerState {
             commits: 0,
             ready: false,
             outgoing_queue: VecDeque::new(),
+            pending_incoming: VecDeque::new(),
             key_package_cache: None,
             welcome_json: None,
             members,

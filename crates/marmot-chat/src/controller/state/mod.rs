@@ -1,11 +1,9 @@
-mod types;
 mod core;
+mod handshake;
 mod member;
 mod message;
 mod ready;
-mod handshake;
+mod types;
 mod utils;
 
-pub use types::{
-    ControllerConfig, ControllerState, Operation,
-};
+pub use types::{ControllerConfig, ControllerState, Operation};

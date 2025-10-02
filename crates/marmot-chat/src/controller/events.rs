@@ -1,5 +1,18 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryAction {
+    /// User should retry the operation
+    Retry,
+    /// User should refresh/restart the session
+    Refresh,
+    /// User should check their connection
+    CheckConnection,
+    /// No automated recovery - just informational
+    None,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionRole {
@@ -93,6 +106,10 @@ pub enum ChatEvent {
     },
     Error {
         message: String,
+        #[serde(default = "default_true")]
+        fatal: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recovery_action: Option<RecoveryAction>,
     },
     Handshake {
         phase: HandshakePhase,
@@ -117,6 +134,31 @@ impl ChatEvent {
     pub fn error<T: Into<String>>(message: T) -> Self {
         ChatEvent::Error {
             message: message.into(),
+            fatal: true,
+            recovery_action: None,
         }
     }
+
+    pub fn error_with_recovery<T: Into<String>>(
+        message: T,
+        recovery_action: RecoveryAction,
+    ) -> Self {
+        ChatEvent::Error {
+            message: message.into(),
+            fatal: true,
+            recovery_action: Some(recovery_action),
+        }
+    }
+
+    pub fn non_fatal_error<T: Into<String>>(message: T) -> Self {
+        ChatEvent::Error {
+            message: message.into(),
+            fatal: false,
+            recovery_action: Some(RecoveryAction::None),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
