@@ -68,7 +68,11 @@
 - Loss/reorder: nonce/gen cache covers out‑of‑order frames; MoQ partial reliability can drop late frames as needed.
 
 ## Interop
-- Nostr‑only clients: unchanged; wrappers are identical.
-- MoQ clients: prefer MoQ for wrappers and media; dual‑publish wrappers to Nostr if needed, or rely on a stateless bridge to mirror MoQ→Nostr.
+- Nostr-only clients: unchanged; wrappers are identical.
+- MoQ clients: prefer MoQ for wrappers and media; dual-publish wrappers to Nostr if needed, or rely on a stateless bridge to mirror MoQ→Nostr.
 - Privacy: single wrappers stream; no type split; random roots/labels; identity learned only upon decrypt.
 
+## Transport Discovery
+- Announce MoQ availability via a dedicated Marmot wrapper event distributed over the existing Nostr relay list; the chat bridge mirrors the latest offer onto the `marmot/<G>/wrappers` track for MoQ-native listeners.
+- Only emit or replace the offer when the MoQ configuration changes (origin, root hint, ingest policy, capability scheme); routine MLS commits and epoch churn do not require a refresh.
+- Capture this signalling in a forthcoming optional MIP so non-MoQ Marmot deployments can ignore it without impacting interoperability.

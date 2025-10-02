@@ -53,14 +53,21 @@ Step 3 — Rust test: MDK chat over local MoQ relay
 - Acceptance
   - End‑to‑end send/receive of M messages with 0 decrypt failures; handles one commit.
 
-Step 4 — WASM demo over MoQ (JWT first)
+Step 4 — WASM demo over MoQ (public relay)
+- Relay config
+  - Keep `moq-relay` in the public/no-auth mode we enabled during Step 3 (no JWT generation or query tokens).
 - Browser integration
-  - Use `@kixelated/moq` to connect to local relay with `?jwt=<token>` (generate via `rs/moq-token-cli` or dev token file).
+  - Add `@kixelated/moq` (WebTransport client) to the demo bundle and connect directly to the local relay (plain URL, no auth params).
+  - Require WebTransport; if negotiation fails, surface a hard error (no WS fallback for this demo).
   - Subscribe to `marmot/<G>/wrappers`; send frames to the `mdk-wasm` worker; render chat timeline.
 - Publisher path
   - Reuse the Rust publisher from Step 3 or a minimal `moq‑chat‑server` to populate `wrappers`.
+- Harness wiring
+  - Extend the Step‑2 Playwright harness (or add a sibling demo page) to consume live MoQ frames, and ensure a publisher process is running before tests.
 - Acceptance
   - Chat renders over real MoQ; reload resumes tailing; acceptable latency.
+- Notes
+  - Step 5 will reintroduce access control using Nostr capabilities in place of JWT.
 
 Step 5 — Implement Nostr auth functionality on MoQ
 - moq‑relay changes
@@ -83,4 +90,3 @@ Notes & Risks
 - WASM: exclude sqlite; use `mdk-memory-storage`. Keep heavy crypto on worker threads.
 - Paging/cursor: start simple; add group sequence u64 in first frame per MoQ group if using `moq‑chat‑server` for fast resume.
 - Privacy: keep group roots/labels random‑looking; avoid npubs in URL paths; rely on capabilities for access control.
-
