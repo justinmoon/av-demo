@@ -291,7 +291,7 @@ export function ChatView(props: ChatViewProps) {
             required
             ref={(el) => (messageInput = el)}
           />
-          <button type="submit" disabled={sending() || !ready()}>
+          <button type="submit" id="send-message" disabled={sending() || !ready()}>
             Send
           </button>
           <button type="button" id="rotate" onClick={handleRotate} disabled={sending() || !ready()}>

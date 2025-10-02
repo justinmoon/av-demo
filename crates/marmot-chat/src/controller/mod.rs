@@ -1,5 +1,4 @@
 pub mod events;
-pub mod local_transport;
 pub mod services;
 mod state;
 
@@ -107,11 +106,13 @@ impl ChatRuntime {
                     op_tx: self.op_tx.clone(),
                 });
                 let state_ref = self.state.borrow();
+                let own_pubkey = state_ref.identity.public_key_hex();
+                let peer_pubkeys: Vec<String> = state_ref.peer_pubkeys.iter().cloned().collect();
                 state_ref.moq.connect(
                     &state_ref.session.relay_url,
                     &state_ref.session.session_id,
-                    state_ref.session.bootstrap_role,
-                    state_ref.session.bootstrap_role.peer(),
+                    &own_pubkey,
+                    &peer_pubkeys,
                     listener,
                 );
             }

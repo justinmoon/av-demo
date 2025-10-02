@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use web_sys::{BinaryType, ErrorEvent, MessageEvent, WebSocket};
 
 use crate::controller::events::{ChatEvent, SessionParams, SessionRole};
-use crate::controller::local_transport;
 use crate::controller::services::{
     HandshakeConnectParams, HandshakeListener, HandshakeMessage, HandshakeMessageBody,
     HandshakeMessageType, IdentityService, MoqListener, MoqService, NostrService,
@@ -121,13 +120,8 @@ fn js_error<E: ToString>(err: E) -> JsValue {
 }
 
 fn build_services(
-    params: &SessionParams,
+    _params: &SessionParams,
 ) -> Result<(Rc<dyn NostrService>, Rc<dyn MoqService>), JsValue> {
-    if let Some(id) = &params.local_transport_id {
-        let (nostr, moq) = local_transport::connect_services(id);
-        Ok((nostr, moq))
-    } else {
-        Ok((Rc::new(JsNostrService::new()), Rc::new(JsMoqService::new())))
-    }
+    Ok((Rc::new(JsNostrService::new()), Rc::new(JsMoqService::new())))
 }
 

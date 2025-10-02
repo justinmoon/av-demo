@@ -440,10 +440,11 @@ pub trait MoqService {
         &self,
         url: &str,
         session: &str,
-        role: SessionRole,
-        peer_role: SessionRole,
+        own_pubkey: &str,
+        peer_pubkeys: &[String],
         listener: Box<dyn MoqListener>,
     );
+    fn subscribe_to_peer(&self, peer_pubkey: &str);
     fn publish_wrapper(&self, bytes: &[u8]);
     fn shutdown(&self);
 }

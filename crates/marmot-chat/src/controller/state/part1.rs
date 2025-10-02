@@ -41,6 +41,7 @@ pub struct ControllerState {
     pub admin_pubkeys: BTreeSet<String>,
     pub peer_pubkeys: BTreeSet<String>,
     pub pending_invites: BTreeMap<String, PendingInvite>,
+    pub subscribed_peers: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +134,7 @@ impl ControllerState {
             admin_pubkeys,
             peer_pubkeys,
             pending_invites: BTreeMap::new(),
+            subscribed_peers: BTreeSet::new(),
         }
     }
 
@@ -269,11 +271,19 @@ impl ControllerState {
             }
         };
         let mut updated = false;
+        let own_pubkey = self.identity.public_key_hex();
         for pubkey in members {
             let entry = self.ensure_member(&pubkey);
             if !entry.joined {
                 entry.joined = true;
                 updated = true;
+            }
+
+            // Subscribe to peer's MoQ track if not already subscribed
+            if pubkey != own_pubkey && !self.subscribed_peers.contains(&pubkey) {
+                info!("sync_members: subscribing to peer {}", &pubkey[..8]);
+                self.moq.subscribe_to_peer(&pubkey);
+                self.subscribed_peers.insert(pubkey.clone());
             }
         }
         if updated {

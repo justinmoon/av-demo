@@ -111,12 +111,7 @@ impl ControllerState {
             .map(|invite| invite.is_admin)
             .unwrap_or(false);
 
-        if requested_admin {
-            self.update_member_admin(&invitee_pub, true);
-        }
-
         self.peer_pubkeys.insert(invitee_pub.clone());
-        self.ensure_member(&invitee_pub);
 
         let artifacts = self
             .identity
@@ -157,10 +152,15 @@ impl ControllerState {
             });
         }
 
-        self.emit_status(format!("Sent welcome to {}", short_key(&invitee_pub)));
         info!("controller: welcome dispatched to {}", invitee_pub);
 
-        self.mark_member_joined(&invitee_pub);
+        // Sync members from MDK to update roster and subscribe to new peer's MoQ track
+        self.sync_members_from_identity()?;
+
+        // Apply admin status after member is created
+        if requested_admin {
+            self.update_member_admin(&invitee_pub, true);
+        }
 
         Ok(())
     }
@@ -342,6 +342,18 @@ impl ControllerState {
                     }
                     self.mark_member_joined(&peer);
                 }
+
+                // Sync all members from MDK to get complete peer list before connecting to MoQ
+                if let Ok(all_members) = self.identity.list_members() {
+                    for pubkey in all_members {
+                        if pubkey != self.identity.public_key_hex() {
+                            self.peer_pubkeys.insert(pubkey.clone());
+                            self.ensure_member(&pubkey);
+                            self.mark_member_joined(&pubkey);
+                        }
+                    }
+                }
+
                 if let Some(provided) = group_id_hex {
                     if provided != accepted_group {
                         log::warn!(

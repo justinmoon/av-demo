@@ -5,8 +5,8 @@ const TRACK_NAME = 'wrappers';
 export interface MoqConnectParams {
   relay: string;
   session: string;
-  role: string;
-  peerRole: string;
+  pubkey: string;
+  peerPubkeys: string[];
 }
 
 export interface MoqConnectCallbacks {
@@ -18,6 +18,7 @@ export interface MoqConnectCallbacks {
 
 export interface MoqHandle {
   publish(data: Uint8Array): void;
+  subscribeToPeer(peerPubkey: string): void;
   close(): void;
 }
 export async function createMoqBridge() {
@@ -30,32 +31,39 @@ export async function createMoqBridge() {
       const normalized: Record<string, unknown> = params instanceof Map ? Object.fromEntries(params as Map<string, unknown>) : (params as Record<string, unknown>);
       const relayValue = normalized.relay;
       const sessionValue = normalized.session;
-      const roleValue = normalized.role;
-      const peerRoleValue = normalized.peerRole;
+      const pubkeyValue = normalized.pubkey;
+      const peerPubkeysValue = normalized.peerPubkeys;
 
-      if (typeof relayValue !== 'string' || typeof sessionValue !== 'string' || typeof roleValue !== 'string' || typeof peerRoleValue !== 'string') {
+      if (typeof relayValue !== 'string' || typeof sessionValue !== 'string' || typeof pubkeyValue !== 'string' || !Array.isArray(peerPubkeysValue)) {
         throw new Error('invalid MoQ connect params');
       }
 
       const relay = relayValue;
       const session = sessionValue;
-      const role = roleValue;
-      const peerRole = peerRoleValue;
-      console.debug('[marmot-moq] connecting', { relay, session, role, peerRole });
+      const pubkey = pubkeyValue;
+      const peerPubkeys = peerPubkeysValue as string[];
+      console.debug('[marmot-moq] connecting', { relay, session, pubkey, peerPubkeys });
       const connection = await Moq.Connection.connect(new URL(relay));
       let closed = false;
 
       const basePath = Moq.Path.from(session, TRACK_NAME);
-      const publishPath = Moq.Path.join(basePath, Moq.Path.from(role));
-      const subscribePath = Moq.Path.join(basePath, Moq.Path.from(peerRole));
+      const publishPath = Moq.Path.join(basePath, Moq.Path.from(pubkey));
 
       console.debug('[marmot-moq] publish path', publishPath.toString());
-      console.debug('[marmot-moq] subscribe path', subscribePath.toString());
+      console.debug('[marmot-moq] subscribing to', peerPubkeys.length, 'peer tracks');
 
       const publisher = new Moq.Broadcast();
       connection.publish(publishPath, publisher);
 
       let currentTrack: Moq.Track | null = null;
+      let readyCalled = false;
+
+      const callOnReady = () => {
+        if (!readyCalled) {
+          readyCalled = true;
+          callbacks.onReady();
+        }
+      };
 
       const acquireTrack = async () => {
         try {
@@ -70,7 +78,8 @@ export async function createMoqBridge() {
             }
             currentTrack = track;
             console.debug('[marmot-moq] publish track ready', { track: track.name });
-            callbacks.onReady();
+            callOnReady();
+            flushPendingPublish();
             try {
               await track.closed;
             } catch (err) {
@@ -100,7 +109,10 @@ export async function createMoqBridge() {
         return /reset_stream/i.test(message) || /not found/i.test(message);
       };
 
-      const consumePeer = async () => {
+      const consumePeerTrack = async (peerPubkey: string) => {
+        const subscribePath = Moq.Path.join(basePath, Moq.Path.from(peerPubkey));
+        console.debug('[marmot-moq] subscribing to peer', peerPubkey, 'path:', subscribePath.toString());
+
         while (!closed) {
           try {
             const broadcast = connection.consume(subscribePath);
@@ -112,9 +124,9 @@ export async function createMoqBridge() {
             }
           } catch (err) {
             if (isTransient(err)) {
-              console.warn('[marmot-moq] transient consume error, retrying', err);
+              console.warn('[marmot-moq] transient consume error for peer', peerPubkey, 'retrying', err);
             } else {
-              console.error('[marmot-moq] consume loop error', err);
+              console.error('[marmot-moq] consume loop error for peer', peerPubkey, err);
               callbacks.onError(err);
             }
             await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -122,13 +134,41 @@ export async function createMoqBridge() {
         }
       };
 
-      void consumePeer();
+      // Subscribe to all peer tracks
+      for (const peerPubkey of peerPubkeys) {
+        if (peerPubkey !== pubkey) {
+          void consumePeerTrack(peerPubkey);
+        }
+      }
+
+      // Mark as ready after a short delay to allow publish setup to complete
+      // This ensures we're ready even if no one subscribes to our track yet
+      setTimeout(() => callOnReady(), 100);
+
+      const pendingPublish: Uint8Array[] = [];
 
       const publish = (data: Uint8Array) => {
         if (currentTrack) {
           currentTrack.writeFrame(data);
         } else {
-          console.warn('[marmot-moq] publish before track ready');
+          console.warn('[marmot-moq] publish before track ready, queuing');
+          pendingPublish.push(data);
+        }
+      };
+
+      const flushPendingPublish = () => {
+        while (pendingPublish.length > 0 && currentTrack) {
+          const data = pendingPublish.shift();
+          if (data) {
+            currentTrack.writeFrame(data);
+          }
+        }
+      };
+
+      const subscribeToPeer = (peerPubkey: string) => {
+        console.debug('[marmot-moq] subscribeToPeer', peerPubkey);
+        if (peerPubkey !== pubkey) {
+          void consumePeerTrack(peerPubkey);
         }
       };
 
@@ -146,6 +186,7 @@ export async function createMoqBridge() {
 
       return {
         publish,
+        subscribeToPeer,
         close,
       };
     },

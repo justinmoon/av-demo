@@ -351,7 +351,7 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
     await waitForMemberCount(initialPage, 3);
 
     await initialPage.fill('#message', 'Hello everyone');
-    await initialPage.click('button[type="submit"]');
+    await initialPage.click('#send-message');
 
     await Promise.all([
       peerPage.waitForFunction(

@@ -55,8 +55,8 @@ impl MoqService for JsMoqService {
         &self,
         url: &str,
         session: &str,
-        role: SessionRole,
-        peer_role: SessionRole,
+        own_pubkey: &str,
+        peer_pubkeys: &[String],
         listener: Box<dyn MoqListener>,
     ) {
         *self.listener.borrow_mut() = Some(listener);
@@ -78,8 +78,8 @@ impl MoqService for JsMoqService {
         let params = json!({
             "relay": url,
             "session": session,
-            "role": role.as_str(),
-            "peerRole": peer_role.as_str(),
+            "pubkey": own_pubkey,
+            "peerPubkeys": peer_pubkeys,
         });
         let params_js = swb::to_value(&params).unwrap_or(JsValue::NULL);
 
@@ -177,6 +177,28 @@ impl MoqService for JsMoqService {
                 }
             }
         });
+    }
+
+    fn subscribe_to_peer(&self, peer_pubkey: &str) {
+        let handle = match self.handle.borrow().as_ref() {
+            Some(h) => h.clone(),
+            None => {
+                log::warn!("subscribe_to_peer called before MoQ connection established");
+                return;
+            }
+        };
+
+        match get_bridge_method(&handle, "subscribeToPeer") {
+            Ok(subscribe_fn) => {
+                let pubkey_js = JsValue::from_str(peer_pubkey);
+                if let Err(err) = subscribe_fn.call1(&handle, &pubkey_js) {
+                    log::error!("subscribe_to_peer error: {:?}", err);
+                }
+            }
+            Err(err) => {
+                log::error!("subscribe_to_peer method not found: {:?}", err);
+            }
+        }
     }
 
     fn publish_wrapper(&self, bytes: &[u8]) {
