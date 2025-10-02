@@ -4,7 +4,26 @@ set -e
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+# Track PIDs
+declare -a PIDS
+
+# Cleanup function
+cleanup() {
+  echo ""
+  echo -e "${YELLOW}Stopping services...${NC}"
+  for pid in "${PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  echo -e "${GREEN}Services stopped${NC}"
+  exit 0
+}
+
+# Set up trap to cleanup on exit
+trap cleanup SIGINT SIGTERM EXIT
 
 echo -e "${BLUE}Building WASM and UI...${NC}"
 npm run build
@@ -17,6 +36,7 @@ if [ ! -f "$MOQ_RELAY_BIN" ]; then
 fi
 $MOQ_RELAY_BIN --dev --bind 127.0.0.1:4443 > /tmp/moq-relay.log 2>&1 &
 MOQ_PID=$!
+PIDS+=($MOQ_PID)
 echo -e "${GREEN}MoQ relay started (PID: $MOQ_PID) at http://127.0.0.1:4443${NC}"
 
 echo -e "${BLUE}Starting Nostr relay...${NC}"
@@ -41,23 +61,15 @@ messages_per_sec = 100
 EOF
   $NOSTR_BIN --config /tmp/nostr-relay/config.toml > /tmp/nostr-relay.log 2>&1 &
   NOSTR_PID=$!
+  PIDS+=($NOSTR_PID)
   echo -e "${GREEN}Nostr relay started (PID: $NOSTR_PID) at ws://127.0.0.1:8880${NC}"
 fi
 
 echo -e "${BLUE}Starting chat UI server...${NC}"
 node apps/chat-ui/server.js --port 8890 > /tmp/chat-ui.log 2>&1 &
 UI_PID=$!
+PIDS+=($UI_PID)
 echo -e "${GREEN}Chat UI started (PID: $UI_PID) at http://localhost:8890${NC}"
-
-# Create cleanup script
-cat > /tmp/stop-dev-server.sh << EOF
-#!/usr/bin/env bash
-echo "Stopping services..."
-kill $MOQ_PID $NOSTR_PID $UI_PID 2>/dev/null || true
-echo "Services stopped"
-rm /tmp/stop-dev-server.sh
-EOF
-chmod +x /tmp/stop-dev-server.sh
 
 echo ""
 echo -e "${GREEN}✓ All services running!${NC}"
@@ -78,10 +90,13 @@ echo "  4. Browser 1: Add Participant → paste Browser 3's pubkey"
 echo "  5. Browser 3: Connect extension → Join invite (paste link)"
 echo "  6. All 3 can now send messages!"
 echo ""
-echo "To stop all services, run:"
-echo "  /tmp/stop-dev-server.sh"
+echo -e "${YELLOW}Press Ctrl+C to stop all services${NC}"
 echo ""
 echo "Logs:"
 echo "  MoQ relay: tail -f /tmp/moq-relay.log"
 echo "  Nostr:     tail -f /tmp/nostr-relay.log"
 echo "  Chat UI:   tail -f /tmp/chat-ui.log"
+echo ""
+
+# Wait for all background processes
+wait
