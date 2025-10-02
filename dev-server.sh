@@ -34,7 +34,11 @@ if [ ! -f "$MOQ_RELAY_BIN" ]; then
   echo "Building moq-relay..."
   (cd "$HOME/code/moq/moq/rs" && cargo build --bin moq-relay)
 fi
-$MOQ_RELAY_BIN --dev --bind 127.0.0.1:4443 > /tmp/moq-relay.log 2>&1 &
+$MOQ_RELAY_BIN \
+  --listen 127.0.0.1:4443 \
+  --tls-generate localhost,127.0.0.1 \
+  --auth-public marmot \
+  --web-http-listen 127.0.0.1:4443 > /tmp/moq-relay.log 2>&1 &
 MOQ_PID=$!
 PIDS+=($MOQ_PID)
 echo -e "${GREEN}MoQ relay started (PID: $MOQ_PID) at http://127.0.0.1:4443${NC}"
