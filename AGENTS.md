@@ -1,7 +1,5 @@
 # Agents Guide
 
-Think about how we can improve our spaghetti code as you work. Opportunistically take notes in plans/spaghetti.md. In the future we'll do a pass where we clean these things up.
-
 NO MOCKS. NO FAKE CODE.
 
 Our goal here is to build an e2ee video and audio calling app on top of Marmot (formerly Whitenoise) protocol -- which is an MLS-based E2EE text chat spec for Nostr -- using MOQ for transport. This is an MVP so we want to keep it simple, we want to max out on privacy, and make it as fast as we can by leverating MOQ's capabilities.
@@ -25,6 +23,7 @@ Never stub things out for a real implementation later unless you are explicitely
 ## CI Requirements
 
 **`just ci` MUST PASS** before any feature or change is considered complete. The agent must iterate on the code and get all CI checks passing. This includes:
+
 - Cargo fmt check
 - Cargo clippy (with -D warnings)
 - Rust unit tests

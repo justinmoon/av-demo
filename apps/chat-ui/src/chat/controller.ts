@@ -27,6 +27,12 @@ export interface ChatHandle {
   sendMessage(content: string): void;
   rotate(): void;
   invite(pubkey: string, isAdmin: boolean): void;
+  // Media crypto methods
+  deriveMediaBaseKey(senderPubkey: string, trackLabel: string): Promise<string>;
+  encryptAudioFrame(baseKeyB64: string, plaintext: Uint8Array, frameCounter: number, aad: Uint8Array): Promise<Uint8Array>;
+  decryptAudioFrame(baseKeyB64: string, ciphertext: Uint8Array, frameCounter: number, aad: Uint8Array): Promise<Uint8Array>;
+  currentEpoch(): Promise<number>;
+  groupRoot(): Promise<string>;
 }
 
 interface ReadyState {
@@ -152,5 +158,21 @@ export async function startChat(session: ChatSession, callbacks: ChatCallbacks):
     sendMessage: (content: string) => controller.send_message(content),
     rotate: () => controller.rotate_epoch(),
     invite: (pubkey: string, isAdmin: boolean) => controller.inviteMember(pubkey, isAdmin),
+    // Media crypto methods
+    deriveMediaBaseKey: async (senderPubkey: string, trackLabel: string) => {
+      return controller.deriveMediaBaseKey(senderPubkey, trackLabel);
+    },
+    encryptAudioFrame: async (baseKeyB64: string, plaintext: Uint8Array, frameCounter: number, aad: Uint8Array) => {
+      return controller.encryptAudioFrame(baseKeyB64, plaintext, frameCounter, aad);
+    },
+    decryptAudioFrame: async (baseKeyB64: string, ciphertext: Uint8Array, frameCounter: number, aad: Uint8Array) => {
+      return controller.decryptAudioFrame(baseKeyB64, ciphertext, frameCounter, aad);
+    },
+    currentEpoch: async () => {
+      return Number(controller.currentEpoch());
+    },
+    groupRoot: async () => {
+      return controller.groupRoot();
+    },
   };
 }

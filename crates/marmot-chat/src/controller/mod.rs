@@ -3,7 +3,7 @@ pub mod events;
 pub mod services;
 mod state;
 
-pub use state::ControllerConfig;
+pub use state::{ControllerConfig, ControllerState};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,7 +13,7 @@ use events::{ChatEvent, RecoveryAction, SessionParams};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
 use log::warn;
-use state::{ControllerState, Operation};
+use state::Operation;
 
 use services::{HandshakeListener, HandshakeMessage, MoqListener};
 
@@ -55,6 +55,11 @@ impl ChatController {
         let _ = self
             .op_tx
             .unbounded_send(Operation::InviteMember { pubkey, is_admin });
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn state(&self) -> Rc<RefCell<ControllerState>> {
+        self.state.clone()
     }
 }
 
@@ -132,9 +137,15 @@ impl ChatRuntime {
                             .collect()
                     }
                 };
+                // Use MLS-derived moq_root if available, otherwise fall back to session_id
+                let moq_path = state_ref
+                    .session
+                    .moq_root
+                    .as_deref()
+                    .unwrap_or(&state_ref.session.session_id);
                 state_ref.moq.connect(
                     &state_ref.session.relay_url,
-                    &state_ref.session.session_id,
+                    moq_path,
                     &own_pubkey,
                     &peer_pubkeys,
                     listener,

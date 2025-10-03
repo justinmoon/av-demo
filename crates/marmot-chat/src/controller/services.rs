@@ -12,12 +12,11 @@ use mdk_core::{
 use mdk_memory_storage::MdkMemoryStorage;
 use mdk_storage_traits::{groups::types::Group, GroupId};
 use nostr::{Event, EventBuilder, JsonUtil, Kind, PublicKey, SecretKey, Timestamp};
-use openmls::group::MlsGroup;
 use openmls::prelude::{KeyPackageBundle, OpenMlsProvider};
 use openmls_traits::storage::StorageProvider;
 use serde::{Deserialize, Serialize};
 
-use crate::messages::{WrapperFrame, WrapperKind};
+use crate::messages::{DirectoryMessage, TrackEntry, WrapperFrame, WrapperKind};
 
 use super::events::SessionRole;
 
@@ -256,11 +255,27 @@ impl IdentityHandle {
             .process_message(&event)
             .context("process message")?
         {
-            MessageProcessingResult::ApplicationMessage(msg) => Ok(WrapperOutcome::Application {
-                author: msg.pubkey.to_hex(),
-                content: msg.content,
-                created_at: msg.created_at.as_u64(),
-            }),
+            MessageProcessingResult::ApplicationMessage(msg) => {
+                let author = msg.pubkey.to_hex();
+                let content = msg.content.clone();
+                let created_at = msg.created_at.as_u64();
+
+                // Try to parse as directory message first
+                if let Ok(directory) = serde_json::from_str::<DirectoryMessage>(&content) {
+                    Ok(WrapperOutcome::Directory {
+                        author,
+                        directory,
+                        created_at,
+                    })
+                } else {
+                    // Fall back to regular text message
+                    Ok(WrapperOutcome::Application {
+                        author,
+                        content,
+                        created_at,
+                    })
+                }
+            }
             MessageProcessingResult::Commit => Ok(WrapperOutcome::Commit),
             MessageProcessingResult::Proposal(_)
             | MessageProcessingResult::ExternalJoinProposal => Ok(WrapperOutcome::None),
@@ -316,13 +331,81 @@ impl IdentityHandle {
 
     pub fn derive_group_root(&self) -> Result<String> {
         let group_id = self.group_id()?;
+        // Use the stable group ID (not epoch-specific export) as MoQ path root
+        // This ensures all members at any epoch use the same path
+        Ok(format!("marmot/{}", hex::encode(group_id.as_slice())))
+    }
+
+    pub fn current_epoch(&self) -> Result<u64> {
+        use openmls::group::MlsGroup;
+        let group_id = self.group_id()?;
         let mls_group = MlsGroup::load(self.mdk.provider.storage(), group_id.inner())
             .context("load group")?
             .ok_or_else(|| anyhow!("group not found"))?;
+        Ok(mls_group.epoch().as_u64())
+    }
+
+    pub fn create_directory_message(&self, tracks: Vec<TrackEntry>) -> Result<WrapperFrame> {
+        let epoch = self.current_epoch()?;
+        let directory = DirectoryMessage {
+            sender: self.public_key_hex(),
+            epoch,
+            tracks,
+        };
+        let content = serde_json::to_string(&directory).context("serialize directory")?;
+        let rumor = EventBuilder::new(Kind::TextNote, content)
+            .custom_created_at(Timestamp::now())
+            .build(self.keys.public_key());
+        let group_id = self.group_id()?;
+        let wrapper = self
+            .mdk
+            .create_message(&group_id, rumor)
+            .context("create directory message")?;
+        Ok(WrapperFrame {
+            bytes: wrapper.as_json().into_bytes(),
+            kind: WrapperKind::Directory(directory),
+        })
+    }
+
+    /// Derive media base key for a specific sender and track
+    ///
+    /// Per spec: base = MLS-Exporter("moq-media-base-v1", sender_leaf || track_label || epoch_bytes, 32)
+    ///
+    /// # Arguments
+    /// * `sender_pubkey_hex` - Sender's public key in hex
+    /// * `track_label` - Track label (already derived from exporter in directory)
+    pub fn derive_media_base_key(
+        &self,
+        sender_pubkey_hex: &str,
+        track_label: &str,
+    ) -> Result<[u8; 32]> {
+        use openmls::group::MlsGroup;
+
+        let group_id = self.group_id()?;
+        let mls_group = MlsGroup::load(self.mdk.provider.storage(), group_id.inner())
+            .context("load group")?
+            .ok_or_else(|| anyhow!("group not found"))?;
+
+        let epoch = mls_group.epoch().as_u64();
+
+        // Construct context: sender_pubkey_hex || track_label || epoch_bytes
+        let mut context = Vec::new();
+        context.extend_from_slice(sender_pubkey_hex.as_bytes());
+        context.extend_from_slice(track_label.as_bytes());
+        context.extend_from_slice(&epoch.to_be_bytes());
+
         let exported = mls_group
-            .export_secret(self.mdk.provider.crypto(), "moq-group-root-v1", &[], 16)
-            .context("export group secret")?;
-        Ok(format!("marmot/{}", hex::encode(exported)))
+            .export_secret(
+                self.mdk.provider.crypto(),
+                "moq-media-base-v1",
+                &context,
+                32,
+            )
+            .context("export media base key")?;
+
+        let mut base_key = [0u8; 32];
+        base_key.copy_from_slice(&exported);
+        Ok(base_key)
     }
 }
 
@@ -351,6 +434,11 @@ pub enum WrapperOutcome {
     Application {
         author: String,
         content: String,
+        created_at: u64,
+    },
+    Directory {
+        author: String,
+        directory: DirectoryMessage,
         created_at: u64,
     },
     Commit,

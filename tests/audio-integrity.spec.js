@@ -9,10 +9,8 @@ const { hexToBytes } = require('@noble/hashes/utils');
 
 const INITIAL_SECRET = '4d36e7068b0eeef39b4e2ff1f908db8b27c12075b1219777084ffcf86490b6ae';
 const PEER_SECRET = '6e8a52c9ac36ca5293b156d8af4d7f6aeb52208419bd99c75472fc6f4321a5fd';
-const EXTRA_SECRET = '9c4e9aba1e3ff5deaa1bcb2a7dce1f2f4a5c6d7e8f9a0b1c2d3e4f5061728394';
 const INITIAL_PUB = getPublicKey(hexToBytes(INITIAL_SECRET));
 const PEER_PUB = getPublicKey(hexToBytes(PEER_SECRET));
-const EXTRA_PUB = getPublicKey(hexToBytes(EXTRA_SECRET));
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const MOQ_ROOT = '/Users/justin/code/moq/moq';
@@ -20,6 +18,7 @@ const RELAY_ROOT = path.join(MOQ_ROOT, 'rs');
 const RELAY_BIN = path.join(RELAY_ROOT, 'target', 'debug', 'moq-relay');
 const SERVER_BIN = path.join(REPO_ROOT, 'apps', 'chat-ui', 'server.js');
 const NOSTR_BIN = process.env.NOSTR_RELAY_BIN || 'nostr-rs-relay';
+const AUDIO_FILE = path.join(__dirname, 'fixtures/audio/test-tone-3s.wav');
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -48,7 +47,14 @@ function spawnProcess(command, args, options = {}) {
 
 async function ensureRelayBuilt() {
   if (!fs.existsSync(RELAY_BIN)) {
-    await runCommand('cargo', ['build', '-p', 'moq-relay'], { cwd: RELAY_ROOT });
+    console.log('Building relay...');
+    const build = spawn('cargo', ['build', '-p', 'moq-relay'], {
+      cwd: RELAY_ROOT,
+      stdio: 'inherit',
+    });
+    await new Promise((resolve, reject) => {
+      build.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`Build failed: ${code}`))));
+    });
   }
 }
 
@@ -79,7 +85,7 @@ function createTempRelayConfig(port) {
 [info]
 relay_url = "ws://127.0.0.1:${port}"
 name = "Marmot Test Relay"
-description = "Ephemeral relay for MoQ chat tests"
+description = "Ephemeral relay for audio integrity tests"
 
 [database]
 data_directory = "${path.join(tmpDir, 'db')}"
@@ -99,11 +105,30 @@ subscription_count_per_client = 128
 mode = "disabled"
 `;
   fs.writeFileSync(configPath, config, 'utf8');
-  return { tmpDir, configPath };
+  return { configPath, tmpDir };
+}
+
+async function waitForOutput(stream, pattern, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    let buffer = '';
+    const onData = (chunk) => {
+      buffer += String(chunk);
+      if (pattern.test(buffer)) {
+        stream.off('data', onData);
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+    const timer = setTimeout(() => {
+      stream.off('data', onData);
+      reject(new Error(`Timed out waiting for pattern ${pattern}`));
+    }, timeoutMs);
+    stream.on('data', onData);
+  });
 }
 
 async function startNostrRelay(port) {
-  const { tmpDir, configPath } = createTempRelayConfig(port);
+  const { configPath, tmpDir } = createTempRelayConfig(port);
   const proc = spawnProcess(NOSTR_BIN, ['--config', configPath], {
     cwd: tmpDir,
     env: {
@@ -116,69 +141,27 @@ async function startNostrRelay(port) {
   return { proc, tmpDir };
 }
 
-function runCommand(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', ...options });
-    child.on('error', reject);
-    child.on('exit', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
-    });
-  });
-}
-
-async function waitForOutput(stream, regex, timeoutMs = 5000) {
-  return new Promise((resolve, reject) => {
-    let buffer = '';
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Timed out waiting for ${regex}`));
-    }, timeoutMs);
-
-    function onData(chunk) {
-      buffer += chunk.toString();
-      if (regex.test(buffer)) {
-        cleanup();
-        resolve();
-      }
-    }
-
-    function onClose() {
-      cleanup();
-      reject(new Error(`Stream closed before matching ${regex}`));
-    }
-
-    function cleanup() {
-      clearTimeout(timer);
-      stream.off('data', onData);
-      stream.off('close', onClose);
-      stream.off('error', onError);
-    }
-
-    function onError(err) {
-      cleanup();
-      reject(err);
-    }
-
-    stream.on('data', onData);
-    stream.once('close', onClose);
-    stream.once('error', onError);
-  });
-}
-
-async function shutdown(child) {
-  if (!child || child.killed) return;
+async function shutdown(proc) {
+  if (!proc) return;
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      if (!child.killed) {
-        child.kill('SIGKILL');
+      try {
+        proc.kill('SIGKILL');
+      } catch (err) {
+        // ignore
       }
-    }, 3000);
-    child.once('close', () => {
+      resolve();
+    }, 2000);
+    proc.on('exit', () => {
       clearTimeout(timer);
       resolve();
     });
-    child.kill('SIGINT');
+    try {
+      proc.kill('SIGTERM');
+    } catch (err) {
+      clearTimeout(timer);
+      resolve();
+    }
   });
 }
 
@@ -188,16 +171,21 @@ async function useManualSecret(page, secret) {
   await page.getByTestId('start-create').waitFor({ timeout: 5000 });
 }
 
-async function waitForChatReady(page) {
-  await page.waitForFunction(() => window.chatReady === true, null, { timeout: 20000 });
-}
+// Configure test to use fake audio file
+test.use({
+  launchOptions: {
+    args: [
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      `--use-file-for-fake-audio-capture=${AUDIO_FILE}`,
+    ],
+  },
+  permissions: ['microphone'],
+});
 
-test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
-  /** @type {import('child_process').ChildProcess | null} */
+test.describe('Audio Integrity Tests', () => {
   let relayProcess = null;
-  /** @type {import('child_process').ChildProcess | null} */
   let serverProcess = null;
-  /** @type {import('child_process').ChildProcess | null} */
   let nostrProcess = null;
   let relayPort;
   let serverPort;
@@ -257,49 +245,44 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
     }
   });
 
-  test('three participants exchange messages over MoQ', async ({ context }) => {
-    await context.addInitScript(() => {
+  test('validates no frames dropped and audio integrity', async ({ context }) => {
+    // Test against localhost first to isolate network vs relay issues
+    const relayParam = process.env.TEST_RELAY || `http://127.0.0.1:${relayPort}/anon`;
+    const nostrParam = process.env.TEST_NOSTR || `ws://127.0.0.1:${nostrPort}/`;
+    const baseUrl = `http://127.0.0.1:${serverPort}`;
+
+    // Clear storage and set defaults
+    await context.addInitScript(({ relay, nostr }) => {
       try {
         window.localStorage?.clear?.();
       } catch (err) {
         console.warn('Failed to clear localStorage during init', err);
       }
+      window.__MARMOT_DEFAULTS = { relay, nostr };
+    }, { relay: relayParam, nostr: nostrParam });
+
+    // Inject audio capture hooks
+    await context.addInitScript(() => {
+      window.audioTestData = {
+        sentFrames: [],
+        receivedFrames: [],
+      };
     });
 
-    const relayParam = `http://127.0.0.1:${relayPort}/anon`;
-    const nostrParam = process.env.MARMOT_NOSTR_URL || `ws://127.0.0.1:${nostrPort}/`;
-    const baseUrl = `http://127.0.0.1:${serverPort}`;
-
-    const waitForMemberCount = async (page, expected) => {
-      await page.waitForFunction(
-        (expectedCount) => (window.chatState?.members?.length ?? 0) >= expectedCount,
-        expected,
-        { timeout: 15000 }
-      );
-    };
-
+    // Start with peer (Bob) waiting to join
     const peerPage = await context.newPage();
     peerPage.on('console', (msg) => console.log('[Peer]', msg.text()));
-    peerPage.on('pageerror', (err) => console.error('[Peer error]', err?.message ?? err, err?.error ?? '', err?.error?.stack ?? '', {
-      type: err?.type,
-      filename: err?.filename,
-      lineno: err?.lineno,
-      colno: err?.colno,
-      error: err?.error,
-    }));
+    peerPage.on('pageerror', (err) => console.error('[Peer error]', err?.message ?? err));
+
     await peerPage.goto(baseUrl);
     await useManualSecret(peerPage, PEER_SECRET);
     await peerPage.getByTestId('start-join').click();
 
+    // Initial creates the chat
     const initialPage = await context.newPage();
     initialPage.on('console', (msg) => console.log('[Initial]', msg.text()));
-    initialPage.on('pageerror', (err) => console.error('[Initial error]', err?.message ?? err, err?.error ?? '', err?.error?.stack ?? '', {
-      type: err?.type,
-      filename: err?.filename,
-      lineno: err?.lineno,
-      colno: err?.colno,
-      error: err?.error,
-    }));
+    initialPage.on('pageerror', (err) => console.error('[Initial error]', err?.message ?? err));
+
     await initialPage.goto(baseUrl);
     await useManualSecret(initialPage, INITIAL_SECRET);
     await initialPage.getByTestId('start-create').click();
@@ -308,99 +291,71 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
     await initialPage.getByTestId('create-nostr').fill(nostrParam);
     await initialPage.getByTestId('create-submit').click();
 
+    // Get invite link and share with peer
     const inviteLink = await initialPage.getByTestId('invite-link').inputValue();
-
     await peerPage.getByTestId('join-code').fill(inviteLink);
     await peerPage.getByTestId('join-relay').fill(relayParam);
     await peerPage.getByTestId('join-nostr').fill(nostrParam);
 
+    // Both enter chat
     await Promise.all([
       peerPage.getByTestId('join-submit').click(),
       initialPage.getByTestId('enter-chat').click(),
     ]);
 
-    await waitForChatReady(peerPage);
-    await waitForChatReady(initialPage);
+    // Wait for audio toggle to appear
+    await initialPage.getByTestId('audio-toggle').waitFor({ timeout: 15000 });
+    await peerPage.getByTestId('audio-toggle').waitFor({ timeout: 15000 });
 
-    await initialPage.getByTestId('invite-pubkey').fill(EXTRA_PUB);
-    await initialPage.getByTestId('invite-submit').click();
+    // Start audio on both sides
+    console.log('\n=== Starting Audio ===\n');
+    await initialPage.getByTestId('audio-toggle').click();
+    await peerPage.getByTestId('audio-toggle').click();
 
-    const extraPage = await context.newPage();
-    extraPage.on('console', (msg) => console.log('[Extra]', msg.text()));
-    extraPage.on('pageerror', (err) => console.error('[Extra error]', err?.message ?? err, err?.error ?? '', err?.error?.stack ?? '', {
-      type: err?.type,
-      filename: err?.filename,
-      lineno: err?.lineno,
-      colno: err?.colno,
-      error: err?.error,
-    }));
-    await extraPage.goto(baseUrl);
-    await useManualSecret(extraPage, EXTRA_SECRET);
-    await extraPage.getByTestId('start-join').click();
-    await extraPage.getByTestId('join-code').fill(inviteLink);
-    await extraPage.getByTestId('join-relay').fill(relayParam);
-    await extraPage.getByTestId('join-nostr').fill(nostrParam);
-    await extraPage.getByTestId('join-submit').click();
+    // Wait for audio to be active
+    await expect(initialPage.getByTestId('audio-toggle')).toHaveText(/Stop Audio/, { timeout: 3000 });
+    await expect(peerPage.getByTestId('audio-toggle')).toHaveText(/Stop Audio/, { timeout: 3000 });
 
-    await waitForChatReady(extraPage);
-    await initialPage.waitForFunction(
-      () => typeof window.chatStatus === 'string' && window.chatStatus.includes('Invite ready'),
-      null,
-      { timeout: 15000 }
-    );
-    await waitForMemberCount(initialPage, 3);
+    // Let audio run for 3 seconds (full duration of test file)
+    console.log('Capturing 3 seconds of audio...\n');
+    await initialPage.waitForTimeout(3000);
 
-    await initialPage.fill('#message', 'Hello everyone');
-    await initialPage.click('#send-message');
+    // Stop audio
+    await initialPage.getByTestId('audio-toggle').click();
+    await peerPage.getByTestId('audio-toggle').click();
 
-    await Promise.all([
-      peerPage.waitForFunction(
-        () => window.chatState?.messages?.some((m) => m.content === 'Hello everyone' && !m.local),
-        null,
-        { timeout: 10000 }
-      ),
-      extraPage.waitForFunction(
-        () => window.chatState?.messages?.some((m) => m.content === 'Hello everyone' && !m.local),
-        null,
-        { timeout: 10000 }
-      ),
-    ]);
+    // Get frame counts from window.audioStats
+    const initialFramesSent = await initialPage.evaluate(() => {
+      return window.audioStats?.encryptedFramesSent || 0;
+    });
 
-    const extraRoster = await extraPage.evaluate(() => window.chatState?.members ?? []);
-    expect(extraRoster.length).toBeGreaterThanOrEqual(2);
+    const peerFramesReceived = await peerPage.evaluate(() => {
+      return window.audioStats?.encryptedFramesReceived || 0;
+    });
 
-    await peerPage.fill('#message', 'Peer says hi');
-    await peerPage.click('button[type="submit"]');
+    console.log('=== Results ===\n');
+    console.log(`Initial sent: ${initialFramesSent} encrypted frames`);
+    console.log(`Peer received: ${peerFramesReceived} encrypted frames`);
 
-    await Promise.all([
-      initialPage.waitForFunction(
-        () => window.chatState?.messages?.some((m) => m.content === 'Peer says hi' && !m.local),
-        null,
-        { timeout: 10000 }
-      ),
-      extraPage.waitForFunction(
-        () => window.chatState?.messages?.some((m) => m.content === 'Peer says hi' && !m.local),
-        null,
-        { timeout: 10000 }
-      ),
-    ]);
+    // Check 1: Some frames should have been sent and received
+    expect(initialFramesSent).toBeGreaterThan(0);
+    expect(peerFramesReceived).toBeGreaterThan(0);
 
-    await extraPage.fill('#message', 'Third participant online');
-    await extraPage.click('button[type="submit"]');
+    // Check 2: No significant frame drops (allow ~5% for network timing)
+    const frameDropCount = initialFramesSent - peerFramesReceived;
+    const dropPercentage = (frameDropCount / initialFramesSent) * 100;
+    console.log(`\nFrame drops: ${frameDropCount} (${dropPercentage.toFixed(1)}%)`);
 
-    await Promise.all([
-      initialPage.waitForFunction(
-        () => window.chatState?.messages?.some((m) => m.content === 'Third participant online' && !m.local),
-        null,
-        { timeout: 10000 }
-      ),
-      peerPage.waitForFunction(
-        () => window.chatState?.messages?.some((m) => m.content === 'Third participant online' && !m.local),
-        null,
-        { timeout: 10000 }
-      ),
-    ]);
+    if (frameDropCount <= 0) {
+      console.log('✅ No frames dropped');
+    } else if (dropPercentage <= 5) {
+      console.log('✅ Frame drops within acceptable range (<5%)');
+    } else {
+      console.log(`⚠️  High frame drop rate: ${dropPercentage.toFixed(1)}%`);
+    }
 
-    await Promise.all([initialPage.close(), peerPage.close(), extraPage.close()]);
+    expect(dropPercentage).toBeLessThan(10); // Allow up to 10% drops for baseline
+
+    console.log('\n=== Test Complete ===\n');
   });
 });

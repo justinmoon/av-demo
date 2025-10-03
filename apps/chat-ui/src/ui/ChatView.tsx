@@ -5,6 +5,12 @@ import { getPublicKey } from 'nostr-tools';
 import type { ChatSession, ChatMessage, ChatState } from '../types';
 import type { ChatHandle, ChatCallbacks, ErrorInfo } from '../chat/controller';
 import { hexToBytes, normalizeHex } from '../utils';
+import { startAudioCapture, float32ToInt16 } from '../audio/capture';
+import { createAudioPlayback, int16ToFloat32 } from '../audio/playback';
+import { createAudioMoq } from '../bridge/audio-moq';
+import type { AudioCaptureHandle } from '../audio/capture';
+import type { AudioPlaybackHandle } from '../audio/playback';
+import type { AudioMoqHandle } from '../bridge/audio-moq';
 
 export interface ChatViewProps {
   session: ChatSession;
@@ -23,10 +29,19 @@ export function ChatView(props: ChatViewProps) {
   const [inviteError, setInviteError] = createSignal('');
   const [inviteSuccess, setInviteSuccess] = createSignal('');
   const [currentError, setCurrentError] = createSignal<ErrorInfo | null>(null);
+  const [audioEnabled, setAudioEnabled] = createSignal(false);
+  const [audioStatus, setAudioStatus] = createSignal('');
+
+  // Debug counters for testing encrypted audio transmission
+  const [encryptedFramesSent, setEncryptedFramesSent] = createSignal(0);
+  const [encryptedFramesReceived, setEncryptedFramesReceived] = createSignal(0);
 
   let controller: ChatHandle | null = null;
   let runId = 0;
   let messageInput: HTMLTextAreaElement | undefined;
+  let audioCapture: AudioCaptureHandle | null = null;
+  let audioMoq: AudioMoqHandle | null = null;
+  let peerPlayback: Map<string, AudioPlaybackHandle> = new Map();
 
   const selfPubkey = createMemo(() => {
     try {
@@ -59,6 +74,10 @@ export function ChatView(props: ChatViewProps) {
     (window as any).chatReady = ready();
     (window as any).chatStatus = status();
     (window as any).chatError = currentError()?.message ?? '';
+    (window as any).audioStats = {
+      encryptedFramesSent: encryptedFramesSent(),
+      encryptedFramesReceived: encryptedFramesReceived(),
+    };
   };
 
   createEffect(syncWindowState);
@@ -73,6 +92,7 @@ export function ChatView(props: ChatViewProps) {
     setReady: (value) => {
       console.debug('[marmot-chat ui] ready', value);
       setReady(value);
+      (window as any).chatReady = value;
     },
     setRoster: (members) => {
       setChatState('members', members.map((member) => ({ ...member })));
@@ -117,6 +137,35 @@ export function ChatView(props: ChatViewProps) {
     }
   };
 
+  const stopAudio = () => {
+    if (audioCapture) {
+      try {
+        audioCapture.stop();
+      } catch (err) {
+        console.warn('Failed to stop audio capture', err);
+      }
+      audioCapture = null;
+    }
+    if (audioMoq) {
+      try {
+        audioMoq.close();
+      } catch (err) {
+        console.warn('Failed to close audio MoQ', err);
+      }
+      audioMoq = null;
+    }
+    for (const [pubkey, playback] of peerPlayback.entries()) {
+      try {
+        playback.stop();
+      } catch (err) {
+        console.warn(`Failed to stop playback for ${pubkey}`, err);
+      }
+    }
+    peerPlayback.clear();
+    setAudioEnabled(false);
+    setAudioStatus('');
+  };
+
   createEffect(() => {
     const session = props.session;
     if (!session) return;
@@ -148,6 +197,7 @@ export function ChatView(props: ChatViewProps) {
 
   onCleanup(() => {
     stopController();
+    stopAudio();
     runId += 1;
     if (typeof window !== 'undefined') {
       delete (window as any).chatState;
@@ -200,6 +250,215 @@ export function ChatView(props: ChatViewProps) {
       setInviteSuccess('Invite sent! Share the original invite link with the new participant.');
     } catch (err) {
       setInviteError((err as Error).message);
+    }
+  };
+
+  const handleAudioToggle = async () => {
+    if (audioEnabled()) {
+      stopAudio();
+      return;
+    }
+
+    try {
+      setAudioStatus('Starting audio...');
+      const myPubkey = selfPubkey();
+      if (!myPubkey || !controller) {
+        throw new Error('Cannot start audio: missing controller or pubkey');
+      }
+
+      // Get MoQ root from controller (MLS-derived)
+      const moqRoot = await controller.groupRoot();
+      const trackLabel = `audio-${myPubkey.slice(0, 8)}`;
+      const epoch = await controller.currentEpoch();
+
+      // Derive media base key for our own audio track
+      const myBaseKey = await controller.deriveMediaBaseKey(myPubkey, trackLabel);
+
+      // Track: base keys for peers (derived when we see them)
+      const peerBaseKeys = new Map<string, string>();
+
+      // Frame counter for outgoing frames
+      let frameCounter = 0;
+
+      // Track frame counters for each peer
+      const peerFrameCounters = new Map<string, number>();
+
+      // Helper: build AAD for a frame (takes track label as parameter)
+      const buildAAD = (trackLabelForAAD: string, groupSeq: number, frameIdx: number, isKeyframe: boolean): Uint8Array => {
+        const encoder = new TextEncoder();
+        const version = new Uint8Array([1]);
+        const groupRootBytes = encoder.encode(moqRoot);
+        const trackLabelBytes = encoder.encode(trackLabelForAAD);
+        const epochBytes = new Uint8Array(8);
+        new DataView(epochBytes.buffer).setBigUint64(0, BigInt(epoch), false); // big-endian
+        const groupSeqBytes = new Uint8Array(8);
+        new DataView(groupSeqBytes.buffer).setBigUint64(0, BigInt(groupSeq), false);
+        const frameIdxBytes = new Uint8Array(8);
+        new DataView(frameIdxBytes.buffer).setBigUint64(0, BigInt(frameIdx), false);
+        const keyframeBytes = new Uint8Array([isKeyframe ? 1 : 0]);
+
+        const parts = [version, groupRootBytes, trackLabelBytes, epochBytes, groupSeqBytes, frameIdxBytes, keyframeBytes];
+        const totalLen = parts.reduce((sum, p) => sum + p.length, 0);
+        const aad = new Uint8Array(totalLen);
+        let offset = 0;
+        for (const part of parts) {
+          aad.set(part, offset);
+          offset += part.length;
+        }
+        return aad;
+      };
+
+      // Create audio MoQ bridge
+      const moq = await createAudioMoq(
+        {
+          relay: props.session.relay,
+          moqRoot,
+          myPubkey,
+          trackLabel,
+        },
+        {
+          onReady: () => {
+            console.debug('[audio] MoQ ready');
+            setAudioStatus('Audio connected (encrypted)');
+          },
+          onPeerAudio: async (peerPubkey, data) => {
+            // Derive peer's base key if not already done
+            if (!peerBaseKeys.has(peerPubkey)) {
+              const peerTrackLabel = `audio-${peerPubkey.slice(0, 8)}`;
+              const peerKey = await controller!.deriveMediaBaseKey(peerPubkey, peerTrackLabel);
+              peerBaseKeys.set(peerPubkey, peerKey);
+            }
+
+            // Extract frame counter from first 4 bytes (big-endian u32)
+            if (data.length < 4) {
+              console.error('[audio] Invalid frame: too small', data.length);
+              return;
+            }
+
+            const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+            const peerFrameCounter = view.getUint32(0, false); // big-endian
+            const ciphertext = new Uint8Array(data.buffer, data.byteOffset + 4, data.byteLength - 4);
+
+            // Build AAD with PEER's track label
+            const peerTrackLabel = `audio-${peerPubkey.slice(0, 8)}`;
+            const groupSeq = 0;
+            const isKeyframe = peerFrameCounter === 0;
+            const aad = buildAAD(peerTrackLabel, groupSeq, peerFrameCounter, isKeyframe);
+
+            const peerKey = peerBaseKeys.get(peerPubkey)!;
+
+            try {
+              const plaintext = await controller!.decryptAudioFrame(peerKey, ciphertext, peerFrameCounter, aad);
+
+              // Get or create playback for this peer
+              if (!peerPlayback.has(peerPubkey)) {
+                const playback = await createAudioPlayback({
+                  sampleRate: 48000,
+                  channelCount: 1,
+                });
+                peerPlayback.set(peerPubkey, playback);
+              }
+              const playback = peerPlayback.get(peerPubkey)!;
+
+              // Convert decrypted Int16 to Float32 for playback
+              const int16 = new Int16Array(plaintext.buffer, plaintext.byteOffset, plaintext.byteLength / 2);
+              const float32 = int16ToFloat32(int16);
+              playback.play(float32);
+
+              // Track successful decryption
+              setEncryptedFramesReceived((prev) => prev + 1);
+
+              // Test hook: expose received audio for validation
+              if ((window as any).audioTestData?.receivedFrames) {
+                (window as any).audioTestData.receivedFrames.push(new Float32Array(float32));
+              }
+
+              // Track frame counter for drop detection
+              const currentCounter = peerFrameCounters.get(peerPubkey) || -1;
+
+              if (peerFrameCounter !== currentCounter + 1 && peerFrameCounter !== 0) {
+                console.warn(`[audio] Frame skip for peer ${peerPubkey.slice(0, 8)}: expected ${currentCounter + 1}, got ${peerFrameCounter} (gap of ${peerFrameCounter - currentCounter - 1})`);
+              }
+              peerFrameCounters.set(peerPubkey, peerFrameCounter);
+            } catch (err) {
+              console.error('[audio] Decrypt error for peer', peerPubkey, 'counter', peerFrameCounter, err);
+            }
+          },
+          onError: (err) => {
+            console.error('[audio] MoQ error', err);
+            setAudioStatus(`Audio error: ${err}`);
+          },
+          onClosed: () => {
+            console.debug('[audio] MoQ closed');
+            setAudioStatus('');
+          },
+        }
+      );
+
+      audioMoq = moq;
+
+      // Subscribe to all known peers
+      for (const peer of chatState.members) {
+        if (peer.pubkey !== myPubkey) {
+          moq.subscribeToPeerAudio(peer.pubkey);
+        }
+      }
+
+      // Start audio capture
+      const capture = await startAudioCapture(
+        {
+          sampleRate: 48000,
+          channelCount: 1,
+          chunkSize: 1024, // ~21ms @ 48kHz (must be power of 2)
+        },
+        {
+          onChunk: async (pcmData) => {
+            // Test hook: expose sent audio for validation
+            if ((window as any).audioTestData?.sentFrames) {
+              (window as any).audioTestData.sentFrames.push(new Float32Array(pcmData));
+            }
+
+            // Convert Float32 to Int16
+            const int16 = float32ToInt16(pcmData);
+            const plaintext = new Uint8Array(int16.buffer);
+
+            // Build AAD for this frame
+            const groupSeq = 0; // MoQ group sequence (would increment for new groups)
+            const isKeyframe = frameCounter === 0;
+            const aad = buildAAD(trackLabel, groupSeq, frameCounter, isKeyframe);
+
+            try {
+              // Encrypt the frame
+              const ciphertext = await controller!.encryptAudioFrame(myBaseKey, plaintext, frameCounter, aad);
+
+              // Prepend frame counter (4 bytes big-endian u32) to encrypted payload
+              const payload = new Uint8Array(4 + ciphertext.length);
+              new DataView(payload.buffer).setUint32(0, frameCounter, false); // big-endian
+              payload.set(ciphertext, 4);
+
+              // Publish encrypted frame with metadata
+              moq.publishAudio(payload);
+              setEncryptedFramesSent((prev) => prev + 1);
+              frameCounter++;
+            } catch (err) {
+              console.error('[audio] Encrypt error', err);
+            }
+          },
+          onError: (err) => {
+            console.error('[audio] Capture error', err);
+            setAudioStatus(`Capture error: ${err.message}`);
+            stopAudio();
+          },
+        }
+      );
+
+      audioCapture = capture;
+      setAudioEnabled(true);
+      setAudioStatus('Audio active (encrypted)');
+    } catch (err) {
+      console.error('[audio] Failed to start audio', err);
+      setAudioStatus(`Failed: ${(err as Error).message}`);
+      stopAudio();
     }
   };
 
@@ -354,7 +613,22 @@ export function ChatView(props: ChatViewProps) {
           >
             Rotate Epoch
           </button>
+          <button
+            type="button"
+            id="audio-toggle"
+            data-testid="audio-toggle"
+            onClick={handleAudioToggle}
+            disabled={!ready() || (currentError()?.fatal ?? false)}
+            classList={{ active: audioEnabled() }}
+          >
+            {audioEnabled() ? '🎤 Stop Audio' : '🎤 Start Audio'}
+          </button>
         </form>
+        <Show when={audioStatus()}>
+          <div id="audio-status" class="audio-status">
+            {audioStatus()}
+          </div>
+        </Show>
       </footer>
     </main>
   );

@@ -283,6 +283,13 @@ impl ControllerState {
                 );
                 self.handshake = HandshakeState::Established;
                 self.emit_handshake_phase(HandshakePhase::Finalizing);
+                // Derive MLS-based MoQ root path and store in session
+                let moq_root = self
+                    .identity
+                    .derive_group_root()
+                    .map_err(|err| anyhow!("failed to derive group root: {err}"))?;
+                info!("controller: derived moq_root={}", moq_root);
+                self.session.moq_root = Some(moq_root);
                 schedule(tx, Operation::ConnectMoq);
                 let self_pub = self.identity.public_key_hex();
                 self.notify_new_member(&self_pub);
@@ -359,6 +366,13 @@ impl ControllerState {
                 }
                 self.handshake = HandshakeState::Established;
                 self.emit_handshake_phase(HandshakePhase::Finalizing);
+                // Derive MLS-based MoQ root path and store in session
+                let moq_root = self
+                    .identity
+                    .derive_group_root()
+                    .map_err(|err| anyhow!("failed to derive group root: {err}"))?;
+                info!("controller: derived moq_root={}", moq_root);
+                self.session.moq_root = Some(moq_root);
                 schedule(tx, Operation::ConnectMoq);
                 schedule(
                     tx,
