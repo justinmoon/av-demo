@@ -5,6 +5,12 @@ import { getPublicKey } from 'nostr-tools';
 import type { ChatSession, ChatMessage, ChatState } from '../types';
 import type { ChatHandle, ChatCallbacks, ErrorInfo } from '../chat/controller';
 import { hexToBytes, normalizeHex } from '../utils';
+import { startAudioCapture, float32ToInt16 } from '../audio/capture';
+import { createAudioPlayback, int16ToFloat32 } from '../audio/playback';
+import { createAudioMoq } from '../bridge/audio-moq';
+import type { AudioCaptureHandle } from '../audio/capture';
+import type { AudioPlaybackHandle } from '../audio/playback';
+import type { AudioMoqHandle } from '../bridge/audio-moq';
 
 export interface ChatViewProps {
   session: ChatSession;
@@ -23,10 +29,15 @@ export function ChatView(props: ChatViewProps) {
   const [inviteError, setInviteError] = createSignal('');
   const [inviteSuccess, setInviteSuccess] = createSignal('');
   const [currentError, setCurrentError] = createSignal<ErrorInfo | null>(null);
+  const [audioEnabled, setAudioEnabled] = createSignal(false);
+  const [audioStatus, setAudioStatus] = createSignal('');
 
   let controller: ChatHandle | null = null;
   let runId = 0;
   let messageInput: HTMLTextAreaElement | undefined;
+  let audioCapture: AudioCaptureHandle | null = null;
+  let audioMoq: AudioMoqHandle | null = null;
+  let peerPlayback: Map<string, AudioPlaybackHandle> = new Map();
 
   const selfPubkey = createMemo(() => {
     try {
@@ -117,6 +128,35 @@ export function ChatView(props: ChatViewProps) {
     }
   };
 
+  const stopAudio = () => {
+    if (audioCapture) {
+      try {
+        audioCapture.stop();
+      } catch (err) {
+        console.warn('Failed to stop audio capture', err);
+      }
+      audioCapture = null;
+    }
+    if (audioMoq) {
+      try {
+        audioMoq.close();
+      } catch (err) {
+        console.warn('Failed to close audio MoQ', err);
+      }
+      audioMoq = null;
+    }
+    for (const [pubkey, playback] of peerPlayback.entries()) {
+      try {
+        playback.stop();
+      } catch (err) {
+        console.warn(`Failed to stop playback for ${pubkey}`, err);
+      }
+    }
+    peerPlayback.clear();
+    setAudioEnabled(false);
+    setAudioStatus('');
+  };
+
   createEffect(() => {
     const session = props.session;
     if (!session) return;
@@ -148,6 +188,7 @@ export function ChatView(props: ChatViewProps) {
 
   onCleanup(() => {
     stopController();
+    stopAudio();
     runId += 1;
     if (typeof window !== 'undefined') {
       delete (window as any).chatState;
@@ -200,6 +241,103 @@ export function ChatView(props: ChatViewProps) {
       setInviteSuccess('Invite sent! Share the original invite link with the new participant.');
     } catch (err) {
       setInviteError((err as Error).message);
+    }
+  };
+
+  const handleAudioToggle = async () => {
+    if (audioEnabled()) {
+      stopAudio();
+      return;
+    }
+
+    try {
+      setAudioStatus('Starting audio...');
+      const myPubkey = selfPubkey();
+      if (!myPubkey) {
+        throw new Error('Cannot determine self pubkey');
+      }
+
+      // For cleartext demo, use sessionId as MoQ path (will use moq_root in checkpoint 6)
+      const moqRoot = props.session.sessionId;
+      const trackLabel = `audio-${myPubkey.slice(0, 8)}`;
+
+      // Create audio MoQ bridge
+      const moq = await createAudioMoq(
+        {
+          relay: props.session.relay,
+          moqRoot,
+          myPubkey,
+          trackLabel,
+        },
+        {
+          onReady: () => {
+            console.debug('[audio] MoQ ready');
+            setAudioStatus('Audio connected');
+          },
+          onPeerAudio: async (peerPubkey, data) => {
+            // Get or create playback for this peer
+            if (!peerPlayback.has(peerPubkey)) {
+              const playback = await createAudioPlayback({
+                sampleRate: 48000,
+                channelCount: 1,
+              });
+              peerPlayback.set(peerPubkey, playback);
+            }
+            const playback = peerPlayback.get(peerPubkey)!;
+            // Convert cleartext Int16 to Float32 for playback
+            const int16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
+            const float32 = int16ToFloat32(int16);
+            playback.play(float32);
+          },
+          onError: (err) => {
+            console.error('[audio] MoQ error', err);
+            setAudioStatus(`Audio error: ${err}`);
+          },
+          onClosed: () => {
+            console.debug('[audio] MoQ closed');
+            setAudioStatus('');
+          },
+        }
+      );
+
+      audioMoq = moq;
+
+      // Subscribe to all known peers
+      for (const peer of chatState.members) {
+        if (peer.pubkey !== myPubkey) {
+          moq.subscribeToPeerAudio(peer.pubkey);
+        }
+      }
+
+      // Start audio capture
+      const capture = await startAudioCapture(
+        {
+          sampleRate: 48000,
+          channelCount: 1,
+          chunkSize: 960, // 20ms @ 48kHz
+        },
+        {
+          onChunk: (pcmData) => {
+            // Convert Float32 to Int16 for transmission (cleartext)
+            const int16 = float32ToInt16(pcmData);
+            const bytes = new Uint8Array(int16.buffer);
+            moq.publishAudio(bytes);
+          },
+          onError: (err) => {
+            console.error('[audio] Capture error', err);
+            setAudioStatus(`Capture error: ${err.message}`);
+            stopAudio();
+          },
+        }
+      );
+
+      audioCapture = capture;
+      setAudioEnabled(true);
+      setAudioStatus('Audio active');
+    } catch (err) {
+      console.error('[audio] Failed to start audio', err);
+      setAudioStatus(`Failed: ${(err as Error).message}`);
+      stopAudio();
     }
   };
 
@@ -354,7 +492,22 @@ export function ChatView(props: ChatViewProps) {
           >
             Rotate Epoch
           </button>
+          <button
+            type="button"
+            id="audio-toggle"
+            data-testid="audio-toggle"
+            onClick={handleAudioToggle}
+            disabled={!ready() || (currentError()?.fatal ?? false)}
+            classList={{ active: audioEnabled() }}
+          >
+            {audioEnabled() ? '🎤 Stop Audio' : '🎤 Start Audio'}
+          </button>
         </form>
+        <Show when={audioStatus()}>
+          <div id="audio-status" class="audio-status">
+            {audioStatus()}
+          </div>
+        </Show>
       </footer>
     </main>
   );
