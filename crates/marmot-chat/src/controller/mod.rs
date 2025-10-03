@@ -12,6 +12,7 @@ use error::{ControllerError, ErrorSeverity, ErrorStage};
 use events::{ChatEvent, RecoveryAction, SessionParams};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
+use log::warn;
 use state::{ControllerState, Operation};
 
 use services::{HandshakeListener, HandshakeMessage, MoqListener};
@@ -115,7 +116,22 @@ impl ChatRuntime {
                 });
                 let state_ref = self.state.borrow();
                 let own_pubkey = state_ref.identity.public_key_hex();
-                let peer_pubkeys: Vec<String> = state_ref.peer_pubkeys.iter().cloned().collect();
+                let peer_pubkeys: Vec<String> = match state_ref.identity.list_members() {
+                    Ok(members) => members
+                        .into_iter()
+                        .filter(|pubkey| pubkey != &own_pubkey)
+                        .collect(),
+                    Err(err) => {
+                        warn!("controller: failed to list members for MoQ connect: {err:#}");
+                        state_ref
+                            .session
+                            .peer_pubkeys
+                            .iter()
+                            .filter(|pubkey| *pubkey != &own_pubkey)
+                            .cloned()
+                            .collect()
+                    }
+                };
                 state_ref.moq.connect(
                     &state_ref.session.relay_url,
                     &state_ref.session.session_id,
@@ -221,7 +237,9 @@ impl ChatRuntime {
                 .with_recovery_action(RecoveryAction::None)
         } else if lower.contains("parse invite pubkey") {
             ControllerError::transient(ErrorStage::Invite, err)
-                .with_user_message("Invite pubkey is invalid. Use the participant's hex or npub key.")
+                .with_user_message(
+                    "Invite pubkey is invalid. Use the participant's hex or npub key.",
+                )
                 .with_recovery_action(RecoveryAction::None)
         } else if lower.contains("cannot invite self") {
             ControllerError::transient(ErrorStage::Invite, err)
@@ -267,9 +285,7 @@ impl ChatRuntime {
                 } else {
                     ChatEvent::error(message.clone())
                 };
-                let send_result = self
-                    .op_tx
-                    .unbounded_send(Operation::Emit(event));
+                let send_result = self.op_tx.unbounded_send(Operation::Emit(event));
                 match send_result {
                     Ok(()) => {
                         log::error!("controller fatal {stage} error: {detail:#}");

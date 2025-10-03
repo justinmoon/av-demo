@@ -68,7 +68,6 @@ impl ControllerState {
                 content,
                 created_at,
             } => {
-                self.mark_member_joined(&author);
                 let local = author == self.identity.public_key_hex();
                 Ok(vec![ChatEvent::Message {
                     author,
@@ -216,22 +215,76 @@ mod tests {
     }
 
     fn create_test_state() -> ControllerState {
-        // Note: This is a minimal test helper. Full integration tests should use real MDK
-        // For now, this validates the error detection logic which doesn't require state
-        use crate::controller::services::IdentityService;
-        use std::collections::{BTreeMap, VecDeque};
+        use std::collections::{BTreeMap, BTreeSet, VecDeque};
+        use std::rc::Rc;
+
+        struct NoopNostr;
+        impl crate::controller::services::NostrService for NoopNostr {
+            fn connect(
+                &self,
+                _params: crate::controller::services::HandshakeConnectParams,
+                _listener: Box<dyn crate::controller::services::HandshakeListener>,
+            ) {
+            }
+
+            fn send(&self, _payload: crate::controller::services::HandshakeMessage) {}
+
+            fn shutdown(&self) {}
+        }
+
+        struct NoopMoq;
+        impl crate::controller::services::MoqService for NoopMoq {
+            fn connect(
+                &self,
+                _url: &str,
+                _session: &str,
+                _own_pubkey: &str,
+                _peer_pubkeys: &[String],
+                _listener: Box<dyn crate::controller::services::MoqListener>,
+            ) {
+            }
+
+            fn subscribe_to_peer(&self, _peer_pubkey: &str) {}
+
+            fn publish_wrapper(&self, _bytes: &[u8]) {}
+
+            fn shutdown(&self) {}
+        }
+
+        let identity = crate::controller::services::IdentityService::create(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .unwrap();
+        let session = crate::controller::events::SessionParams {
+            bootstrap_role: crate::controller::events::SessionRole::Initial,
+            relay_url: String::new(),
+            nostr_url: String::new(),
+            session_id: String::new(),
+            secret_hex: String::new(),
+            peer_pubkeys: vec![],
+            group_id_hex: None,
+            admin_pubkeys: vec![],
+            local_transport_id: None,
+        };
+        let nostr: Rc<dyn crate::controller::services::NostrService> = Rc::new(NoopNostr);
+        let moq: Rc<dyn crate::controller::services::MoqService> = Rc::new(NoopMoq);
 
         ControllerState {
+            identity,
+            session,
+            nostr,
+            moq,
+            callback: Rc::new(|_| {}),
             handshake: super::super::types::HandshakeState::WaitingForKeyPackage,
-            identity: IdentityService::new("test".to_string(), "".to_string(), vec![], vec![]),
             commits: 0,
             ready: false,
             outgoing_queue: VecDeque::new(),
             pending_incoming: VecDeque::new(),
             key_package_cache: None,
             welcome_json: None,
-            members: BTreeMap::new(),
-            subscribed_peers: std::collections::BTreeSet::new(),
+            admin_pubkeys: BTreeSet::new(),
+            pending_invites: BTreeMap::new(),
+            subscribed_peers: BTreeSet::new(),
         }
     }
 }

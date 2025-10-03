@@ -27,8 +27,8 @@ playwright:
 web-test *ARGS:
 	./scripts/test-web.sh {{ARGS}}
 
-dev relay_port='54943' server_port='8890' nostr_port='7447' hosts='localhost,127.0.0.1':
-	./scripts/run-web.sh --relay-port {{relay_port}} --server-port {{server_port}} --nostr-port {{nostr_port}} --hosts {{hosts}}
+dev relay_port='54943' server_port='8890' nostr_port='8880' hosts='localhost,127.0.0.1':
+	./scripts/dev.sh --relay-port {{relay_port}} --server-port {{server_port}} --nostr-port {{nostr_port}} --hosts {{hosts}}
 
 chat-dev port='8890':
 	npm run build

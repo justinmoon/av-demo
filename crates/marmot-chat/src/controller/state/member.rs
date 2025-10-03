@@ -3,53 +3,39 @@ use log::{info, warn};
 
 use crate::controller::events::{ChatEvent, MemberInfo};
 
-use super::types::{ControllerState, MemberRecord};
+use super::types::ControllerState;
+use super::utils::short_key;
 
 impl ControllerState {
     pub(super) fn emit_roster(&self) {
-        let members: Vec<MemberInfo> = self
-            .members
-            .values()
-            .filter(|record| record.joined)
-            .map(|record| record.info.clone())
+        let all_members = match self.identity.list_members() {
+            Ok(members) => members,
+            Err(err) => {
+                warn!("Failed to list members: {err:#}");
+                return;
+            }
+        };
+
+        let members: Vec<MemberInfo> = all_members
+            .into_iter()
+            .map(|pubkey| MemberInfo {
+                pubkey: pubkey.clone(),
+                is_admin: self.admin_pubkeys.contains(&pubkey),
+            })
             .collect();
+
         if !members.is_empty() {
             (self.callback)(ChatEvent::Roster { members });
         }
     }
 
-    pub(super) fn ensure_member(&mut self, pubkey: &str) -> &mut MemberRecord {
-        let is_admin = self.admin_pubkeys.contains(pubkey);
-        self.peer_pubkeys.insert(pubkey.to_string());
-        self.members
-            .entry(pubkey.to_string())
-            .or_insert_with(|| MemberRecord {
-                info: MemberInfo {
-                    pubkey: pubkey.to_string(),
-                    is_admin,
-                },
-                joined: false,
-            })
-    }
-
-    pub(super) fn mark_member_joined(&mut self, pubkey: &str) {
-        let newly_joined = {
-            let entry = self.ensure_member(pubkey);
-            if entry.joined {
-                false
-            } else {
-                entry.joined = true;
-                true
-            }
+    pub(super) fn notify_new_member(&self, pubkey: &str) {
+        let member = MemberInfo {
+            pubkey: pubkey.to_string(),
+            is_admin: self.admin_pubkeys.contains(pubkey),
         };
-        if newly_joined {
-            if let Some(record) = self.members.get(pubkey) {
-                (self.callback)(ChatEvent::MemberJoined {
-                    member: record.info.clone(),
-                });
-            }
-            self.emit_roster();
-        }
+        (self.callback)(ChatEvent::MemberJoined { member });
+        self.emit_roster();
     }
 
     pub(super) fn update_member_admin(&mut self, pubkey: &str, is_admin: bool) {
@@ -59,59 +45,44 @@ impl ControllerState {
             self.admin_pubkeys.remove(pubkey);
         }
 
-        let mut updated_member: Option<MemberInfo> = None;
-        if let Some(entry) = self.members.get_mut(pubkey) {
-            if entry.info.is_admin != is_admin {
-                entry.info.is_admin = is_admin;
-                updated_member = Some(entry.info.clone());
+        match self.identity.list_members() {
+            Ok(members) => {
+                if members.iter().any(|member| member == pubkey) {
+                    let member = MemberInfo {
+                        pubkey: pubkey.to_string(),
+                        is_admin,
+                    };
+                    (self.callback)(ChatEvent::MemberUpdated {
+                        member: member.clone(),
+                    });
+                    self.emit_roster();
+                }
             }
-        } else {
-            let entry = self.ensure_member(pubkey);
-            entry.info.is_admin = is_admin;
-            updated_member = Some(entry.info.clone());
-        }
-
-        if let Some(member) = updated_member {
-            (self.callback)(ChatEvent::MemberUpdated {
-                member: member.clone(),
-            });
-            if self
-                .members
-                .get(pubkey)
-                .map(|record| record.joined)
-                .unwrap_or(false)
-            {
-                self.emit_roster();
+            Err(err) => {
+                warn!("Failed to list members while updating admin: {err:#}");
             }
         }
     }
 
     pub(super) fn sync_members_from_identity(&mut self) -> Result<()> {
         let members = match self.identity.list_members() {
-            Ok(list) => list,
+            Ok(members) => members,
             Err(err) => {
-                warn!("sync_members_from_identity failed: {err:#}");
+                warn!("Failed to list members during sync: {err:#}");
                 return Ok(());
             }
         };
-        let mut updated = false;
         let own_pubkey = self.identity.public_key_hex();
         for pubkey in members {
-            let entry = self.ensure_member(&pubkey);
-            if !entry.joined {
-                entry.joined = true;
-                updated = true;
-            }
-
-            // Subscribe to peer's MoQ track if not already subscribed
             if pubkey != own_pubkey && !self.subscribed_peers.contains(&pubkey) {
-                info!("sync_members: subscribing to peer {}", &pubkey[..8]);
+                info!(
+                    "Syncing members: subscribing to peer {}",
+                    short_key(&pubkey)
+                );
                 self.moq.subscribe_to_peer(&pubkey);
                 self.subscribed_peers.insert(pubkey.clone());
+                self.notify_new_member(&pubkey);
             }
-        }
-        if updated {
-            self.emit_roster();
         }
         Ok(())
     }

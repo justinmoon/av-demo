@@ -38,7 +38,9 @@ export function Onboarding(props: OnboardingProps) {
   const [pubkey, setPubkey] = createSignal<string>('');
   const [secretHex, setSecretHex] = createSignal<string>('');
   const [loginError, setLoginError] = createSignal<string>('');
-  const [relayUrl, setRelayUrl] = createSignal(props.defaults.relay ?? 'http://127.0.0.1:4443/marmot');
+  const [relayUrl, setRelayUrl] = createSignal(
+    props.defaults.relay ?? 'http://127.0.0.1:54943/marmot'
+  );
   const [nostrUrl, setNostrUrl] = createSignal(props.defaults.nostr ?? 'ws://127.0.0.1:8880/');
   const [peerPub, setPeerPub] = createSignal('');
   const [inviteLink, setInviteLink] = createSignal('');
@@ -46,6 +48,7 @@ export function Onboarding(props: OnboardingProps) {
   const [joinError, setJoinError] = createSignal('');
   const [createError, setCreateError] = createSignal('');
   const [joinCode, setJoinCode] = createSignal('');
+  const [manualSecretValue, setManualSecretValue] = createSignal('');
   let manualSecretInputRef: HTMLInputElement | undefined;
 
   createEffect(() => {
@@ -174,6 +177,31 @@ export function Onboarding(props: OnboardingProps) {
                 Generate temp key
               </button>
             </div>
+            <details class="manual-secret" open>
+              <summary>Use existing secret</summary>
+              <div class="manual-secret__content">
+                <label for="manual-secret">Paste secret hex</label>
+                <div class="manual-secret__row">
+                  <input
+                    id="manual-secret"
+                    ref={manualSecretInputRef}
+                    value={manualSecretValue()}
+                    onInput={(event) => setManualSecretValue(event.currentTarget.value)}
+                    placeholder="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                    autocomplete="off"
+                    spellcheck={false}
+                    data-testid="manual-secret-input"
+                  />
+                  <button
+                    type="button"
+                    data-testid="manual-secret-continue"
+                    onClick={() => handleManualSecret(manualSecretValue().trim())}
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            </details>
             <Show when={loginError()}>
               {(err) => <div class="login-status error">{err()}</div>}
             </Show>
