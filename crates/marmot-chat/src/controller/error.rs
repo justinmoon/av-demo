@@ -66,7 +66,15 @@ impl ControllerError {
         self
     }
 
-    pub fn into_parts(self) -> (ErrorSeverity, ErrorStage, String, Option<RecoveryAction>, Error) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        ErrorSeverity,
+        ErrorStage,
+        String,
+        Option<RecoveryAction>,
+        Error,
+    ) {
         let severity = self.severity;
         let stage = self.stage;
         let message = self

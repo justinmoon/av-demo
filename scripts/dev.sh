@@ -3,7 +3,7 @@ set -euo pipefail
 
 relay_port="54943"
 server_port="8890"
-nostr_port="7447"
+nostr_port="8880"
 hosts="localhost,127.0.0.1"
 
 while [[ $# -gt 0 ]]; do
@@ -69,6 +69,11 @@ if [[ ! -d node_modules ]]; then
   npm install
 fi
 
+if nc -z 127.0.0.1 "$nostr_port" >/dev/null 2>&1; then
+  echo "error: nostr port $nostr_port is already in use; rerun with --nostr-port PORT" >&2
+  exit 1
+fi
+
 echo "Building wasm bundle and chat UI" >&2
 npm run build
 
@@ -108,7 +113,7 @@ CHAT_PID=$!
 cat <<INFO
 
 Marmot chat UI is ready.
-  Relay:   https://127.0.0.1:$relay_port/marmot
+  Relay:   http://127.0.0.1:$relay_port/marmot
   UI:      http://127.0.0.1:$server_port/
   Nostr:   ws://127.0.0.1:$nostr_port/
 

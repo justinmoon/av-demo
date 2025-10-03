@@ -42,17 +42,14 @@ impl ControllerState {
             return Err(anyhow!("cannot invite self"));
         }
 
-        if self
-            .members
-            .get(&pubkey)
-            .map(|member| member.joined)
-            .unwrap_or(false)
-        {
-            info!(
-                "controller: request_invite abort pubkey={} already joined",
-                pubkey
-            );
-            return Err(anyhow!("member already present"));
+        if let Ok(existing_members) = self.identity.list_members() {
+            if existing_members.iter().any(|member| member == &pubkey) {
+                info!(
+                    "controller: request_invite abort pubkey={} already joined",
+                    pubkey
+                );
+                return Err(anyhow!("member already present"));
+            }
         }
 
         if self.pending_invites.contains_key(&pubkey) {
@@ -63,7 +60,6 @@ impl ControllerState {
             return Err(anyhow!("invite already pending"));
         }
 
-        self.peer_pubkeys.insert(pubkey.clone());
         self.pending_invites
             .insert(pubkey.clone(), PendingInvite { is_admin });
 
@@ -75,8 +71,6 @@ impl ControllerState {
         if is_admin {
             self.update_member_admin(&pubkey, true);
         }
-
-        self.ensure_member(&pubkey);
 
         self.emit_status(format!(
             "Requesting key package from {}",
@@ -126,8 +120,6 @@ impl ControllerState {
             .map(|invite| invite.is_admin)
             .unwrap_or(false);
 
-        self.peer_pubkeys.insert(invitee_pub.clone());
-
         let artifacts = self
             .identity
             .add_members(std::slice::from_ref(&event_json))
@@ -137,7 +129,10 @@ impl ControllerState {
             "controller: add_members produced commit_bytes={} welcomes={} total_members={}",
             artifacts.commit.bytes.len(),
             artifacts.welcomes.len(),
-            self.members.len()
+            self.identity
+                .list_members()
+                .map(|members| members.len())
+                .unwrap_or(0)
         );
 
         self.commits += 1;
@@ -259,8 +254,6 @@ impl ControllerState {
                     return self.handle_member_addition(tx, invitee_pub, event, bundle);
                 }
 
-                self.peer_pubkeys.insert(invitee_pub.clone());
-                self.ensure_member(&invitee_pub);
                 if self.admin_pubkeys.contains(&invitee_pub) {
                     self.update_member_admin(&invitee_pub, true);
                 }
@@ -291,8 +284,9 @@ impl ControllerState {
                 self.handshake = HandshakeState::Established;
                 self.emit_handshake_phase(HandshakePhase::Finalizing);
                 schedule(tx, Operation::ConnectMoq);
-                self.mark_member_joined(&self.identity.public_key_hex());
-                self.mark_member_joined(&invitee_pub);
+                let self_pub = self.identity.public_key_hex();
+                self.notify_new_member(&self_pub);
+                self.sync_members_from_identity()?;
                 self.flush_pending_incoming(tx)?;
                 Ok(())
             }
@@ -350,27 +344,9 @@ impl ControllerState {
                 }
                 self.emit_status("Accepting welcome…");
                 let accepted_group = self.identity.accept_welcome(&welcome)?;
-                self.mark_member_joined(&self.identity.public_key_hex());
-                let known_peers = self.session.peer_pubkeys.clone();
-                for peer in known_peers {
-                    self.peer_pubkeys.insert(peer.clone());
-                    self.ensure_member(&peer);
-                    if self.admin_pubkeys.contains(&peer) {
-                        self.update_member_admin(&peer, true);
-                    }
-                    self.mark_member_joined(&peer);
-                }
-
-                // Sync all members from MDK to get complete peer list before connecting to MoQ
-                if let Ok(all_members) = self.identity.list_members() {
-                    for pubkey in all_members {
-                        if pubkey != self.identity.public_key_hex() {
-                            self.peer_pubkeys.insert(pubkey.clone());
-                            self.ensure_member(&pubkey);
-                            self.mark_member_joined(&pubkey);
-                        }
-                    }
-                }
+                let self_pub = self.identity.public_key_hex();
+                self.notify_new_member(&self_pub);
+                self.sync_members_from_identity()?;
 
                 if let Some(provided) = group_id_hex {
                     if provided != accepted_group {
