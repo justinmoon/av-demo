@@ -366,6 +366,47 @@ impl IdentityHandle {
             kind: WrapperKind::Directory(directory),
         })
     }
+
+    /// Derive media base key for a specific sender and track
+    ///
+    /// Per spec: base = MLS-Exporter("moq-media-base-v1", sender_leaf || track_label || epoch_bytes, 32)
+    ///
+    /// # Arguments
+    /// * `sender_pubkey_hex` - Sender's public key in hex
+    /// * `track_label` - Track label (already derived from exporter in directory)
+    pub fn derive_media_base_key(
+        &self,
+        sender_pubkey_hex: &str,
+        track_label: &str,
+    ) -> Result<[u8; 32]> {
+        use openmls::group::MlsGroup;
+
+        let group_id = self.group_id()?;
+        let mls_group = MlsGroup::load(self.mdk.provider.storage(), group_id.inner())
+            .context("load group")?
+            .ok_or_else(|| anyhow!("group not found"))?;
+
+        let epoch = mls_group.epoch().as_u64();
+
+        // Construct context: sender_pubkey_hex || track_label || epoch_bytes
+        let mut context = Vec::new();
+        context.extend_from_slice(sender_pubkey_hex.as_bytes());
+        context.extend_from_slice(track_label.as_bytes());
+        context.extend_from_slice(&epoch.to_be_bytes());
+
+        let exported = mls_group
+            .export_secret(
+                self.mdk.provider.crypto(),
+                "moq-media-base-v1",
+                &context,
+                32,
+            )
+            .context("export media base key")?;
+
+        let mut base_key = [0u8; 32];
+        base_key.copy_from_slice(&exported);
+        Ok(base_key)
+    }
 }
 
 pub struct IdentityService;

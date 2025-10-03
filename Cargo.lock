@@ -1178,6 +1178,7 @@ checksum = "bfe949189f46fabb938b3a9a0be30fdd93fd8a09260da863399a8cf3db756ec8"
 name = "marmot-chat"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "base64 0.21.7",
  "console_error_panic_hook",
@@ -1186,6 +1187,7 @@ dependencies = [
  "getrandom 0.2.16",
  "gloo-timers",
  "hex",
+ "hkdf",
  "js-sys",
  "log",
  "mdk-core",
@@ -1201,6 +1203,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "sha2",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",

@@ -1,4 +1,5 @@
 pub mod controller;
+pub mod media_crypto;
 pub mod messages;
 
 #[cfg(target_arch = "wasm32")]
