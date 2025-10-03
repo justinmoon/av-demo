@@ -263,3 +263,89 @@ const startTime = Math.max(now + 0.05, nextStartTime);  // Add 50ms buffer
 ```
 
 These two changes might completely fix the choppy audio!
+
+## Playwright Test Suite Overview
+
+We have several Playwright tests for validating audio quality and detecting frame drops:
+
+### `tests/audio-integrity.spec.js`
+**Purpose**: Validates audio transmission quality using deterministic test audio files
+
+**What it tests**:
+- Plays a real 3-second WAV file through the system
+- Measures frame drop rate between sender and receiver
+- Validates audio data integrity (RMS values, sample correctness)
+- Compares sent vs received frame counts
+
+**Useful for production testing**: ✅ **YES** - Set environment variables to test against production:
+```bash
+TEST_RELAY=https://moq.justinmoon.com/anon TEST_NOSTR=wss://damus.nostr.com npm test tests/audio-integrity.spec.js
+```
+
+**Key metrics**:
+- Frame drop percentage (should be <20% over internet, 0% on localhost)
+- Audio integrity validation (RMS values should match)
+
+### `tests/step5-audio.spec.js`
+**Purpose**: UI and basic audio functionality tests
+
+**What it tests**:
+- Audio toggle button appears
+- Two participants can toggle audio independently
+- MoQ audio tracks are created correctly
+- Basic send/receive flow works
+
+**Useful for production testing**: ⚠️ **LIMITED** - Tests basic functionality but doesn't measure quality or frame drops. Good for smoke testing but won't show network-related issues.
+
+### `tests/step6-audio-e2e.spec.js`
+**Purpose**: End-to-end encrypted audio transmission validation
+
+**What it tests**:
+- Deterministic audio file transmission (test-tone-3s.wav)
+- Bit-for-bit decryption validation
+- Frame counter integrity
+- Encrypted audio frame structure
+
+**Useful for production testing**: ✅ **YES** - Great for testing production relay:
+```bash
+# Run against production (modify relay path in test file first)
+npm test tests/step6-audio-e2e.spec.js
+```
+
+**Key metrics**:
+- Frame drop warnings in console
+- Encrypted frames sent/received counts
+- Audio data integrity after decryption
+
+### `tests/debug-audio-frames.spec.js`
+**Purpose**: Debug test for investigating frame skipping issues
+
+**What it tests**:
+- Currently skipped (test.skip)
+- Was used during debugging to trace frame-by-frame behavior
+- Logs detailed timing and sequence information
+
+**Useful for production testing**: ❌ **NO** - Debug tool, currently disabled
+
+### Best Test for Production Frame Drop Detection
+
+**Recommended**: Use `tests/audio-integrity.spec.js` with production relay:
+
+```bash
+TEST_RELAY=https://moq.justinmoon.com/anon \
+TEST_NOSTR=wss://damus.nostr.com \
+npm test tests/audio-integrity.spec.js
+```
+
+This will show you:
+1. Exact frame drop percentage
+2. Whether VPN is causing issues (compare with/without VPN)
+3. Audio quality degradation metrics
+4. Network vs application issues (compare localhost vs production)
+
+**Example output**:
+```
+Localhost:     0% drops (perfect)
+Production:   15% drops (normal UDP packet loss)
+With VPN:     66% drops (VPN interfering with UDP/QUIC)
+```
