@@ -16,7 +16,7 @@ use openmls::prelude::{KeyPackageBundle, OpenMlsProvider};
 use openmls_traits::storage::StorageProvider;
 use serde::{Deserialize, Serialize};
 
-use crate::messages::{WrapperFrame, WrapperKind};
+use crate::messages::{DirectoryMessage, TrackEntry, WrapperFrame, WrapperKind};
 
 use super::events::SessionRole;
 
@@ -255,11 +255,27 @@ impl IdentityHandle {
             .process_message(&event)
             .context("process message")?
         {
-            MessageProcessingResult::ApplicationMessage(msg) => Ok(WrapperOutcome::Application {
-                author: msg.pubkey.to_hex(),
-                content: msg.content,
-                created_at: msg.created_at.as_u64(),
-            }),
+            MessageProcessingResult::ApplicationMessage(msg) => {
+                let author = msg.pubkey.to_hex();
+                let content = msg.content.clone();
+                let created_at = msg.created_at.as_u64();
+
+                // Try to parse as directory message first
+                if let Ok(directory) = serde_json::from_str::<DirectoryMessage>(&content) {
+                    Ok(WrapperOutcome::Directory {
+                        author,
+                        directory,
+                        created_at,
+                    })
+                } else {
+                    // Fall back to regular text message
+                    Ok(WrapperOutcome::Application {
+                        author,
+                        content,
+                        created_at,
+                    })
+                }
+            }
             MessageProcessingResult::Commit => Ok(WrapperOutcome::Commit),
             MessageProcessingResult::Proposal(_)
             | MessageProcessingResult::ExternalJoinProposal => Ok(WrapperOutcome::None),
@@ -319,6 +335,37 @@ impl IdentityHandle {
         // This ensures all members at any epoch use the same path
         Ok(format!("marmot/{}", hex::encode(group_id.as_slice())))
     }
+
+    pub fn current_epoch(&self) -> Result<u64> {
+        use openmls::group::MlsGroup;
+        let group_id = self.group_id()?;
+        let mls_group = MlsGroup::load(self.mdk.provider.storage(), group_id.inner())
+            .context("load group")?
+            .ok_or_else(|| anyhow!("group not found"))?;
+        Ok(mls_group.epoch().as_u64())
+    }
+
+    pub fn create_directory_message(&self, tracks: Vec<TrackEntry>) -> Result<WrapperFrame> {
+        let epoch = self.current_epoch()?;
+        let directory = DirectoryMessage {
+            sender: self.public_key_hex(),
+            epoch,
+            tracks,
+        };
+        let content = serde_json::to_string(&directory).context("serialize directory")?;
+        let rumor = EventBuilder::new(Kind::TextNote, content)
+            .custom_created_at(Timestamp::now())
+            .build(self.keys.public_key());
+        let group_id = self.group_id()?;
+        let wrapper = self
+            .mdk
+            .create_message(&group_id, rumor)
+            .context("create directory message")?;
+        Ok(WrapperFrame {
+            bytes: wrapper.as_json().into_bytes(),
+            kind: WrapperKind::Directory(directory),
+        })
+    }
 }
 
 pub struct IdentityService;
@@ -346,6 +393,11 @@ pub enum WrapperOutcome {
     Application {
         author: String,
         content: String,
+        created_at: u64,
+    },
+    Directory {
+        author: String,
+        directory: DirectoryMessage,
         created_at: u64,
     },
     Commit,

@@ -62,6 +62,8 @@ impl ControllerState {
     }
 
     fn ingest_wrapper_bytes(&mut self, bytes: &[u8]) -> Result<Vec<ChatEvent>> {
+        use crate::controller::events::{TrackInfo, TrackMediaKind};
+
         match self.identity.ingest_wrapper(bytes)? {
             crate::controller::services::WrapperOutcome::Application {
                 author,
@@ -74,6 +76,32 @@ impl ControllerState {
                     content,
                     created_at,
                     local,
+                }])
+            }
+            crate::controller::services::WrapperOutcome::Directory {
+                author,
+                directory,
+                created_at: _,
+            } => {
+                // Convert directory message to UI-friendly format
+                let tracks = directory
+                    .tracks
+                    .into_iter()
+                    .map(|track| TrackInfo {
+                        label: track.label,
+                        kind: match track.kind {
+                            crate::messages::TrackKind::Audio => TrackMediaKind::Audio,
+                            crate::messages::TrackKind::Video => TrackMediaKind::Video,
+                            crate::messages::TrackKind::Screen => TrackMediaKind::Screen,
+                        },
+                        codec_name: track.codec.name,
+                    })
+                    .collect();
+
+                Ok(vec![ChatEvent::DirectoryUpdate {
+                    sender: author,
+                    epoch: directory.epoch,
+                    tracks,
                 }])
             }
             crate::controller::services::WrapperOutcome::Commit => {

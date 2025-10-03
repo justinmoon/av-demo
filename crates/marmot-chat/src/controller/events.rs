@@ -117,6 +117,29 @@ pub enum ChatEvent {
     Handshake {
         phase: HandshakePhase,
     },
+    /// Directory update received from a participant
+    DirectoryUpdate {
+        sender: String,
+        epoch: u64,
+        tracks: Vec<TrackInfo>,
+    },
+}
+
+/// Track information for UI consumption
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrackInfo {
+    pub label: String,
+    pub kind: TrackMediaKind,
+    pub codec_name: String,
+}
+
+/// Media track kind (simplified for UI)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TrackMediaKind {
+    Audio,
+    Video,
+    Screen,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
