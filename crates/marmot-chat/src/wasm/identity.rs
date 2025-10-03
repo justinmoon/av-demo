@@ -120,8 +120,13 @@ impl WasmChatController {
     /// Derive media base key for a given sender and track label
     /// Returns base64-encoded 32-byte key
     #[wasm_bindgen(js_name = deriveMediaBaseKey)]
-    pub fn derive_media_base_key(&self, sender_pubkey: String, track_label: String) -> Result<String, JsValue> {
-        let base_key = self.state
+    pub fn derive_media_base_key(
+        &self,
+        sender_pubkey: String,
+        track_label: String,
+    ) -> Result<String, JsValue> {
+        let base_key = self
+            .state
             .borrow()
             .identity
             .derive_media_base_key(&sender_pubkey, &track_label)
@@ -146,11 +151,12 @@ impl WasmChatController {
         frame_counter: u32,
         aad: &[u8],
     ) -> Result<Vec<u8>, JsValue> {
+        use crate::media_crypto::MediaCrypto;
         use base64::engine::general_purpose::STANDARD as BASE64;
         use base64::Engine as _;
-        use crate::media_crypto::MediaCrypto;
 
-        let base_key_bytes = BASE64.decode(&base_key_b64)
+        let base_key_bytes = BASE64
+            .decode(&base_key_b64)
             .map_err(|e| js_error(format!("invalid base key: {e}")))?;
 
         if base_key_bytes.len() != 32 {
@@ -161,7 +167,8 @@ impl WasmChatController {
         base_key.copy_from_slice(&base_key_bytes);
 
         let mut crypto = MediaCrypto::new(base_key);
-        let ciphertext = crypto.encrypt(plaintext, frame_counter, aad)
+        let ciphertext = crypto
+            .encrypt(plaintext, frame_counter, aad)
             .map_err(js_error)?;
 
         Ok(ciphertext)
@@ -181,11 +188,12 @@ impl WasmChatController {
         frame_counter: u32,
         aad: &[u8],
     ) -> Result<Vec<u8>, JsValue> {
+        use crate::media_crypto::MediaCrypto;
         use base64::engine::general_purpose::STANDARD as BASE64;
         use base64::Engine as _;
-        use crate::media_crypto::MediaCrypto;
 
-        let base_key_bytes = BASE64.decode(&base_key_b64)
+        let base_key_bytes = BASE64
+            .decode(&base_key_b64)
             .map_err(|e| js_error(format!("invalid base key: {e}")))?;
 
         if base_key_bytes.len() != 32 {
@@ -196,7 +204,8 @@ impl WasmChatController {
         base_key.copy_from_slice(&base_key_bytes);
 
         let mut crypto = MediaCrypto::new(base_key);
-        let plaintext = crypto.decrypt(ciphertext, frame_counter, aad)
+        let plaintext = crypto
+            .decrypt(ciphertext, frame_counter, aad)
             .map_err(js_error)?;
 
         Ok(plaintext)

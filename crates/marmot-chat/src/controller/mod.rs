@@ -57,6 +57,7 @@ impl ChatController {
             .unbounded_send(Operation::InviteMember { pubkey, is_admin });
     }
 
+    #[allow(dead_code)]
     pub(crate) fn state(&self) -> Rc<RefCell<ControllerState>> {
         self.state.clone()
     }
