@@ -367,6 +367,11 @@ export function ChatView(props: ChatViewProps) {
               // Track successful decryption
               setEncryptedFramesReceived((prev) => prev + 1);
 
+              // Test hook: expose received audio for validation
+              if ((window as any).audioTestData?.receivedFrames) {
+                (window as any).audioTestData.receivedFrames.push(new Float32Array(float32));
+              }
+
               // Track frame counter for debugging
               const currentCounter = peerFrameCounters.get(peerPubkey) || -1;
               if (peerFrameCounter !== currentCounter + 1 && peerFrameCounter !== 0) {
@@ -406,6 +411,11 @@ export function ChatView(props: ChatViewProps) {
         },
         {
           onChunk: async (pcmData) => {
+            // Test hook: expose sent audio for validation
+            if ((window as any).audioTestData?.sentFrames) {
+              (window as any).audioTestData.sentFrames.push(new Float32Array(pcmData));
+            }
+
             // Convert Float32 to Int16
             const int16 = float32ToInt16(pcmData);
             const plaintext = new Uint8Array(int16.buffer);
