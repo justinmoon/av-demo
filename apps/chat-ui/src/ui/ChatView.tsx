@@ -253,13 +253,48 @@ export function ChatView(props: ChatViewProps) {
     try {
       setAudioStatus('Starting audio...');
       const myPubkey = selfPubkey();
-      if (!myPubkey) {
-        throw new Error('Cannot determine self pubkey');
+      if (!myPubkey || !controller) {
+        throw new Error('Cannot start audio: missing controller or pubkey');
       }
 
-      // For cleartext demo, use sessionId as MoQ path (will use moq_root in checkpoint 6)
-      const moqRoot = props.session.sessionId;
+      // Get MoQ root from controller (MLS-derived)
+      const moqRoot = await controller.groupRoot();
       const trackLabel = `audio-${myPubkey.slice(0, 8)}`;
+      const epoch = await controller.currentEpoch();
+
+      // Derive media base key for our own audio track
+      const myBaseKey = await controller.deriveMediaBaseKey(myPubkey, trackLabel);
+
+      // Track: base keys for peers (derived when we see them)
+      const peerBaseKeys = new Map<string, string>();
+
+      // Frame counter for outgoing frames
+      let frameCounter = 0;
+
+      // Helper: build AAD for a frame
+      const buildAAD = (groupSeq: number, frameIdx: number, isKeyframe: boolean): Uint8Array => {
+        const encoder = new TextEncoder();
+        const version = new Uint8Array([1]);
+        const groupRootBytes = encoder.encode(moqRoot);
+        const trackLabelBytes = encoder.encode(trackLabel);
+        const epochBytes = new Uint8Array(8);
+        new DataView(epochBytes.buffer).setBigUint64(0, BigInt(epoch), false); // big-endian
+        const groupSeqBytes = new Uint8Array(8);
+        new DataView(groupSeqBytes.buffer).setBigUint64(0, BigInt(groupSeq), false);
+        const frameIdxBytes = new Uint8Array(8);
+        new DataView(frameIdxBytes.buffer).setBigUint64(0, BigInt(frameIdx), false);
+        const keyframeBytes = new Uint8Array([isKeyframe ? 1 : 0]);
+
+        const parts = [version, groupRootBytes, trackLabelBytes, epochBytes, groupSeqBytes, frameIdxBytes, keyframeBytes];
+        const totalLen = parts.reduce((sum, p) => sum + p.length, 0);
+        const aad = new Uint8Array(totalLen);
+        let offset = 0;
+        for (const part of parts) {
+          aad.set(part, offset);
+          offset += part.length;
+        }
+        return aad;
+      };
 
       // Create audio MoQ bridge
       const moq = await createAudioMoq(
@@ -272,22 +307,43 @@ export function ChatView(props: ChatViewProps) {
         {
           onReady: () => {
             console.debug('[audio] MoQ ready');
-            setAudioStatus('Audio connected');
+            setAudioStatus('Audio connected (encrypted)');
           },
           onPeerAudio: async (peerPubkey, data) => {
-            // Get or create playback for this peer
-            if (!peerPlayback.has(peerPubkey)) {
-              const playback = await createAudioPlayback({
-                sampleRate: 48000,
-                channelCount: 1,
-              });
-              peerPlayback.set(peerPubkey, playback);
+            // Derive peer's base key if not already done
+            if (!peerBaseKeys.has(peerPubkey)) {
+              const peerTrackLabel = `audio-${peerPubkey.slice(0, 8)}`;
+              const peerKey = await controller!.deriveMediaBaseKey(peerPubkey, peerTrackLabel);
+              peerBaseKeys.set(peerPubkey, peerKey);
             }
-            const playback = peerPlayback.get(peerPubkey)!;
-            // Convert cleartext Int16 to Float32 for playback
-            const int16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
-            const float32 = int16ToFloat32(int16);
-            playback.play(float32);
+
+            // Decrypt the frame
+            // For now, assume frame counter and AAD are embedded or known
+            // In production, you'd extract metadata from MoQ object header
+            const peerKey = peerBaseKeys.get(peerPubkey)!;
+            const peerFrameCounter = 0; // TODO: extract from MoQ metadata
+            const aad = buildAAD(0, peerFrameCounter, false); // TODO: proper metadata
+
+            try {
+              const plaintext = await controller!.decryptAudioFrame(peerKey, data, peerFrameCounter, aad);
+
+              // Get or create playback for this peer
+              if (!peerPlayback.has(peerPubkey)) {
+                const playback = await createAudioPlayback({
+                  sampleRate: 48000,
+                  channelCount: 1,
+                });
+                peerPlayback.set(peerPubkey, playback);
+              }
+              const playback = peerPlayback.get(peerPubkey)!;
+
+              // Convert decrypted Int16 to Float32 for playback
+              const int16 = new Int16Array(plaintext.buffer, plaintext.byteOffset, plaintext.byteLength / 2);
+              const float32 = int16ToFloat32(int16);
+              playback.play(float32);
+            } catch (err) {
+              console.error('[audio] Decrypt error for peer', peerPubkey, err);
+            }
           },
           onError: (err) => {
             console.error('[audio] MoQ error', err);
@@ -317,11 +373,27 @@ export function ChatView(props: ChatViewProps) {
           chunkSize: 960, // 20ms @ 48kHz
         },
         {
-          onChunk: (pcmData) => {
-            // Convert Float32 to Int16 for transmission (cleartext)
+          onChunk: async (pcmData) => {
+            // Convert Float32 to Int16
             const int16 = float32ToInt16(pcmData);
-            const bytes = new Uint8Array(int16.buffer);
-            moq.publishAudio(bytes);
+            const plaintext = new Uint8Array(int16.buffer);
+
+            // Build AAD for this frame
+            const groupSeq = 0; // MoQ group sequence (would increment for new groups)
+            const isKeyframe = frameCounter === 0;
+            const aad = buildAAD(groupSeq, frameCounter, isKeyframe);
+
+            try {
+              // Encrypt the frame
+              const ciphertext = await controller!.encryptAudioFrame(myBaseKey, plaintext, frameCounter, aad);
+
+              // Publish encrypted frame
+              moq.publishAudio(ciphertext);
+
+              frameCounter++;
+            } catch (err) {
+              console.error('[audio] Encrypt error', err);
+            }
           },
           onError: (err) => {
             console.error('[audio] Capture error', err);
@@ -333,7 +405,7 @@ export function ChatView(props: ChatViewProps) {
 
       audioCapture = capture;
       setAudioEnabled(true);
-      setAudioStatus('Audio active');
+      setAudioStatus('Audio active (encrypted)');
     } catch (err) {
       console.error('[audio] Failed to start audio', err);
       setAudioStatus(`Failed: ${(err as Error).message}`);
