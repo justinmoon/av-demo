@@ -402,7 +402,7 @@ export function ChatView(props: ChatViewProps) {
         {
           sampleRate: 48000,
           channelCount: 1,
-          chunkSize: 960, // 20ms @ 48kHz
+          chunkSize: 1024, // ~21ms @ 48kHz (must be power of 2)
         },
         {
           onChunk: async (pcmData) => {
