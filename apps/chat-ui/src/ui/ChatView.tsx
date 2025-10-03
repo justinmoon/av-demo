@@ -92,6 +92,7 @@ export function ChatView(props: ChatViewProps) {
     setReady: (value) => {
       console.debug('[marmot-chat ui] ready', value);
       setReady(value);
+      (window as any).chatReady = value;
     },
     setRoster: (members) => {
       setChatState('members', members.map((member) => ({ ...member })));
@@ -372,14 +373,11 @@ export function ChatView(props: ChatViewProps) {
                 (window as any).audioTestData.receivedFrames.push(new Float32Array(float32));
               }
 
-              // Track frame counter for debugging
+              // Track frame counter for drop detection
               const currentCounter = peerFrameCounters.get(peerPubkey) || -1;
 
-              // Debug: log ALL received frames to diagnose drops
-              console.log(`[audio] RECEIVED frame ${peerFrameCounter} from ${peerPubkey.slice(0, 8)}`);
-
               if (peerFrameCounter !== currentCounter + 1 && peerFrameCounter !== 0) {
-                console.warn(`[audio] ⚠️  FRAME SKIP for peer ${peerPubkey.slice(0, 8)}: expected ${currentCounter + 1}, got ${peerFrameCounter} (gap of ${peerFrameCounter - currentCounter - 1})`);
+                console.warn(`[audio] Frame skip for peer ${peerPubkey.slice(0, 8)}: expected ${currentCounter + 1}, got ${peerFrameCounter} (gap of ${peerFrameCounter - currentCounter - 1})`);
               }
               peerFrameCounters.set(peerPubkey, peerFrameCounter);
             } catch (err) {
@@ -441,10 +439,6 @@ export function ChatView(props: ChatViewProps) {
               // Publish encrypted frame with metadata
               moq.publishAudio(payload);
               setEncryptedFramesSent((prev) => prev + 1);
-
-              // Debug: log ALL frames to diagnose drops (can be disabled after debugging)
-              console.log(`[audio] SENT frame ${frameCounter} (size: ${payload.length} bytes)`);
-
               frameCounter++;
             } catch (err) {
               console.error('[audio] Encrypt error', err);

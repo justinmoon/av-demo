@@ -236,7 +236,7 @@ test.describe('Audio UI Tests', () => {
   });
 
   test('audio toggle button appears and toggles state', async ({ context }) => {
-    const relayParam = `http://127.0.0.1:${relayPort}/marmot`;
+    const relayParam = `http://127.0.0.1:${relayPort}/anon`;
     const nostrParam = process.env.MARMOT_NOSTR_URL || `ws://127.0.0.1:${nostrPort}/`;
     const baseUrl = `http://127.0.0.1:${serverPort}`;
 
@@ -355,7 +355,7 @@ test.describe('Audio UI Tests', () => {
   });
 
   test('two participants can toggle audio independently', async ({ context }) => {
-    const relayParam = `http://127.0.0.1:${relayPort}/marmot`;
+    const relayParam = `http://127.0.0.1:${relayPort}/anon`;
     const nostrParam = process.env.MARMOT_NOSTR_URL || `ws://127.0.0.1:${nostrPort}/`;
     const baseUrl = `http://127.0.0.1:${serverPort}`;
 

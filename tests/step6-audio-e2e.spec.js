@@ -233,7 +233,7 @@ test.describe('End-to-End Encrypted Audio Transmission', () => {
   });
 
   test('transmits deterministic audio and validates bit-for-bit decryption', async ({ context }) => {
-    const relayParam = `http://127.0.0.1:${relayPort}/marmot`;
+    const relayParam = `http://127.0.0.1:${relayPort}/anon`;
     const nostrParam = process.env.MARMOT_NOSTR_URL || `ws://127.0.0.1:${nostrPort}/`;
     const baseUrl = `http://127.0.0.1:${serverPort}`;
 
