@@ -374,6 +374,12 @@ export function ChatView(props: ChatViewProps) {
 
               // Track frame counter for debugging
               const currentCounter = peerFrameCounters.get(peerPubkey) || -1;
+
+              // Debug: log every 50th received frame
+              if (peerFrameCounter % 50 === 0) {
+                console.debug('[audio] Received frame', peerFrameCounter, 'from', peerPubkey.slice(0, 8));
+              }
+
               if (peerFrameCounter !== currentCounter + 1 && peerFrameCounter !== 0) {
                 console.warn('[audio] Frame skip for peer', peerPubkey, 'expected', currentCounter + 1, 'got', peerFrameCounter);
               }
@@ -437,6 +443,11 @@ export function ChatView(props: ChatViewProps) {
               // Publish encrypted frame with metadata
               moq.publishAudio(payload);
               setEncryptedFramesSent((prev) => prev + 1);
+
+              // Debug: log every 50th frame to track what's being sent
+              if (frameCounter % 50 === 0) {
+                console.debug('[audio] Published frame', frameCounter);
+              }
 
               frameCounter++;
             } catch (err) {
