@@ -265,6 +265,7 @@ mod tests {
             group_id_hex: None,
             admin_pubkeys: vec![],
             local_transport_id: None,
+            moq_root: None,
         };
         let nostr: Rc<dyn crate::controller::services::NostrService> = Rc::new(NoopNostr);
         let moq: Rc<dyn crate::controller::services::MoqService> = Rc::new(NoopMoq);

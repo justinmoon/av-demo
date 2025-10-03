@@ -60,6 +60,9 @@ pub struct SessionParams {
     pub admin_pubkeys: Vec<String>,
     #[serde(default)]
     pub local_transport_id: Option<String>,
+    /// MLS-derived MoQ root path (replaces session_id for MoQ transport after group establishment)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moq_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -12,7 +12,6 @@ use mdk_core::{
 use mdk_memory_storage::MdkMemoryStorage;
 use mdk_storage_traits::{groups::types::Group, GroupId};
 use nostr::{Event, EventBuilder, JsonUtil, Kind, PublicKey, SecretKey, Timestamp};
-use openmls::group::MlsGroup;
 use openmls::prelude::{KeyPackageBundle, OpenMlsProvider};
 use openmls_traits::storage::StorageProvider;
 use serde::{Deserialize, Serialize};
@@ -316,13 +315,9 @@ impl IdentityHandle {
 
     pub fn derive_group_root(&self) -> Result<String> {
         let group_id = self.group_id()?;
-        let mls_group = MlsGroup::load(self.mdk.provider.storage(), group_id.inner())
-            .context("load group")?
-            .ok_or_else(|| anyhow!("group not found"))?;
-        let exported = mls_group
-            .export_secret(self.mdk.provider.crypto(), "moq-group-root-v1", &[], 16)
-            .context("export group secret")?;
-        Ok(format!("marmot/{}", hex::encode(exported)))
+        // Use the stable group ID (not epoch-specific export) as MoQ path root
+        // This ensures all members at any epoch use the same path
+        Ok(format!("marmot/{}", hex::encode(group_id.as_slice())))
     }
 }
 

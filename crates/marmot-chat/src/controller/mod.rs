@@ -132,9 +132,15 @@ impl ChatRuntime {
                             .collect()
                     }
                 };
+                // Use MLS-derived moq_root if available, otherwise fall back to session_id
+                let moq_path = state_ref
+                    .session
+                    .moq_root
+                    .as_deref()
+                    .unwrap_or(&state_ref.session.session_id);
                 state_ref.moq.connect(
                     &state_ref.session.relay_url,
-                    &state_ref.session.session_id,
+                    moq_path,
                     &own_pubkey,
                     &peer_pubkeys,
                     listener,
