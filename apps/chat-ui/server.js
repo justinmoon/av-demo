@@ -67,6 +67,14 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Try dist/ folder first (for built assets like main.js)
+  const distPath = safeJoin(path.join(appRoot, 'dist'), pathname.slice(1));
+  if (distPath && fs.existsSync(distPath)) {
+    serveFile(distPath, res);
+    return;
+  }
+
+  // Fall back to appRoot for other files
   const filePath = safeJoin(appRoot, pathname.slice(1));
   if (!filePath) {
     res.writeHead(403, commonHeaders());
