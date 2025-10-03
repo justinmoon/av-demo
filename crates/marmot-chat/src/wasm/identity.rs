@@ -21,7 +21,7 @@ use crate::controller::services::{
     HandshakeConnectParams, HandshakeListener, HandshakeMessage, HandshakeMessageBody,
     HandshakeMessageType, IdentityHandle, IdentityService, MoqListener, MoqService, NostrService,
 };
-use crate::controller::{ChatController, ControllerConfig};
+use crate::controller::{ChatController, ControllerConfig, ControllerState};
 
 use super::moq_bridge::JsMoqService;
 use super::nostr_client::JsNostrService;
@@ -55,7 +55,7 @@ pub fn wasm_start() {
 #[wasm_bindgen]
 pub struct WasmChatController {
     controller: ChatController,
-    identity: Rc<IdentityHandle>,
+    state: Rc<RefCell<ControllerState>>,
     _callback: Rc<Function>,
 }
 
@@ -81,10 +81,6 @@ impl WasmChatController {
             }
         });
 
-        // We need to keep a separate identity reference for WASM methods
-        // Clone the MDK and other fields since controller takes ownership
-        let identity_for_wasm = Rc::new(IdentityService::create(&params.secret_hex).map_err(js_error)?);
-
         let config = ControllerConfig {
             identity,
             session: params,
@@ -94,11 +90,12 @@ impl WasmChatController {
         };
 
         let controller = ChatController::new(config);
+        let state = controller.state();
         controller.start();
 
         Ok(Self {
             controller,
-            identity: identity_for_wasm,
+            state,
             _callback: callback_rc,
         })
     }
@@ -124,7 +121,9 @@ impl WasmChatController {
     /// Returns base64-encoded 32-byte key
     #[wasm_bindgen(js_name = deriveMediaBaseKey)]
     pub fn derive_media_base_key(&self, sender_pubkey: String, track_label: String) -> Result<String, JsValue> {
-        let base_key = self.identity
+        let base_key = self.state
+            .borrow()
+            .identity
             .derive_media_base_key(&sender_pubkey, &track_label)
             .map_err(js_error)?;
 
@@ -206,7 +205,9 @@ impl WasmChatController {
     /// Get current epoch number
     #[wasm_bindgen(js_name = currentEpoch)]
     pub fn current_epoch(&self) -> Result<u64, JsValue> {
-        self.identity
+        self.state
+            .borrow()
+            .identity
             .current_epoch()
             .map_err(js_error)
     }
@@ -214,7 +215,9 @@ impl WasmChatController {
     /// Get group root (MoQ path base)
     #[wasm_bindgen(js_name = groupRoot)]
     pub fn group_root(&self) -> Result<String, JsValue> {
-        self.identity
+        self.state
+            .borrow()
+            .identity
             .derive_group_root()
             .map_err(js_error)
     }

@@ -6,6 +6,8 @@ use anyhow::{anyhow, Result};
 use hkdf::Hkdf;
 use sha2::Sha256;
 use std::collections::HashMap;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
 /// Media encryption key manager
@@ -17,12 +19,14 @@ use std::time::{Duration, Instant};
 pub struct MediaCrypto {
     base_key: [u8; 32],
     key_cache: HashMap<u8, CachedGeneration>,
+    #[cfg(not(target_arch = "wasm32"))]
     cache_ttl: Duration,
 }
 
 struct CachedGeneration {
     aead_key: [u8; 16],
     nonce_salt: [u8; 12],
+    #[cfg(not(target_arch = "wasm32"))]
     created_at: Instant,
 }
 
@@ -32,6 +36,7 @@ impl MediaCrypto {
         Self {
             base_key,
             key_cache: HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             cache_ttl: Duration::from_secs(10),
         }
     }
@@ -57,10 +62,13 @@ impl MediaCrypto {
 
     /// Get or derive keys for a generation, with caching
     fn get_generation_keys(&mut self, generation: u8) -> Result<(&[u8; 16], &[u8; 12])> {
-        // Evict expired cache entries
-        let now = Instant::now();
-        self.key_cache
-            .retain(|_, cached| now.duration_since(cached.created_at) < self.cache_ttl);
+        // Evict expired cache entries (not available in WASM)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let now = Instant::now();
+            self.key_cache
+                .retain(|_, cached| now.duration_since(cached.created_at) < self.cache_ttl);
+        }
 
         // Get or create cache entry
         if !self.key_cache.contains_key(&generation) {
@@ -70,7 +78,8 @@ impl MediaCrypto {
                 CachedGeneration {
                     aead_key,
                     nonce_salt,
-                    created_at: now,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    created_at: Instant::now(),
                 },
             );
         }

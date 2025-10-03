@@ -271,12 +271,15 @@ export function ChatView(props: ChatViewProps) {
       // Frame counter for outgoing frames
       let frameCounter = 0;
 
-      // Helper: build AAD for a frame
-      const buildAAD = (groupSeq: number, frameIdx: number, isKeyframe: boolean): Uint8Array => {
+      // Track frame counters for each peer
+      const peerFrameCounters = new Map<string, number>();
+
+      // Helper: build AAD for a frame (takes track label as parameter)
+      const buildAAD = (trackLabelForAAD: string, groupSeq: number, frameIdx: number, isKeyframe: boolean): Uint8Array => {
         const encoder = new TextEncoder();
         const version = new Uint8Array([1]);
         const groupRootBytes = encoder.encode(moqRoot);
-        const trackLabelBytes = encoder.encode(trackLabel);
+        const trackLabelBytes = encoder.encode(trackLabelForAAD);
         const epochBytes = new Uint8Array(8);
         new DataView(epochBytes.buffer).setBigUint64(0, BigInt(epoch), false); // big-endian
         const groupSeqBytes = new Uint8Array(8);
@@ -317,15 +320,26 @@ export function ChatView(props: ChatViewProps) {
               peerBaseKeys.set(peerPubkey, peerKey);
             }
 
-            // Decrypt the frame
-            // For now, assume frame counter and AAD are embedded or known
-            // In production, you'd extract metadata from MoQ object header
+            // Extract frame counter from first 4 bytes (big-endian u32)
+            if (data.length < 4) {
+              console.error('[audio] Invalid frame: too small', data.length);
+              return;
+            }
+
+            const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+            const peerFrameCounter = view.getUint32(0, false); // big-endian
+            const ciphertext = new Uint8Array(data.buffer, data.byteOffset + 4, data.byteLength - 4);
+
+            // Build AAD with PEER's track label
+            const peerTrackLabel = `audio-${peerPubkey.slice(0, 8)}`;
+            const groupSeq = 0;
+            const isKeyframe = peerFrameCounter === 0;
+            const aad = buildAAD(peerTrackLabel, groupSeq, peerFrameCounter, isKeyframe);
+
             const peerKey = peerBaseKeys.get(peerPubkey)!;
-            const peerFrameCounter = 0; // TODO: extract from MoQ metadata
-            const aad = buildAAD(0, peerFrameCounter, false); // TODO: proper metadata
 
             try {
-              const plaintext = await controller!.decryptAudioFrame(peerKey, data, peerFrameCounter, aad);
+              const plaintext = await controller!.decryptAudioFrame(peerKey, ciphertext, peerFrameCounter, aad);
 
               // Get or create playback for this peer
               if (!peerPlayback.has(peerPubkey)) {
@@ -341,8 +355,15 @@ export function ChatView(props: ChatViewProps) {
               const int16 = new Int16Array(plaintext.buffer, plaintext.byteOffset, plaintext.byteLength / 2);
               const float32 = int16ToFloat32(int16);
               playback.play(float32);
+
+              // Track frame counter for debugging
+              const currentCounter = peerFrameCounters.get(peerPubkey) || -1;
+              if (peerFrameCounter !== currentCounter + 1 && peerFrameCounter !== 0) {
+                console.warn('[audio] Frame skip for peer', peerPubkey, 'expected', currentCounter + 1, 'got', peerFrameCounter);
+              }
+              peerFrameCounters.set(peerPubkey, peerFrameCounter);
             } catch (err) {
-              console.error('[audio] Decrypt error for peer', peerPubkey, err);
+              console.error('[audio] Decrypt error for peer', peerPubkey, 'counter', peerFrameCounter, err);
             }
           },
           onError: (err) => {
@@ -381,14 +402,19 @@ export function ChatView(props: ChatViewProps) {
             // Build AAD for this frame
             const groupSeq = 0; // MoQ group sequence (would increment for new groups)
             const isKeyframe = frameCounter === 0;
-            const aad = buildAAD(groupSeq, frameCounter, isKeyframe);
+            const aad = buildAAD(trackLabel, groupSeq, frameCounter, isKeyframe);
 
             try {
               // Encrypt the frame
               const ciphertext = await controller!.encryptAudioFrame(myBaseKey, plaintext, frameCounter, aad);
 
-              // Publish encrypted frame
-              moq.publishAudio(ciphertext);
+              // Prepend frame counter (4 bytes big-endian u32) to encrypted payload
+              const payload = new Uint8Array(4 + ciphertext.length);
+              new DataView(payload.buffer).setUint32(0, frameCounter, false); // big-endian
+              payload.set(ciphertext, 4);
+
+              // Publish encrypted frame with metadata
+              moq.publishAudio(payload);
 
               frameCounter++;
             } catch (err) {

@@ -3,7 +3,7 @@ pub mod events;
 pub mod services;
 mod state;
 
-pub use state::ControllerConfig;
+pub use state::{ControllerConfig, ControllerState};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,7 +13,7 @@ use events::{ChatEvent, RecoveryAction, SessionParams};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
 use log::warn;
-use state::{ControllerState, Operation};
+use state::Operation;
 
 use services::{HandshakeListener, HandshakeMessage, MoqListener};
 
@@ -55,6 +55,10 @@ impl ChatController {
         let _ = self
             .op_tx
             .unbounded_send(Operation::InviteMember { pubkey, is_admin });
+    }
+
+    pub(crate) fn state(&self) -> Rc<RefCell<ControllerState>> {
+        self.state.clone()
     }
 }
 
