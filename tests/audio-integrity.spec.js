@@ -207,7 +207,7 @@ test.describe('Audio Integrity Tests', () => {
       [
         '--listen', `127.0.0.1:${relayPort}`,
         '--tls-generate', 'localhost,127.0.0.1',
-        '--auth-public', 'marmot',
+        '--auth-public', 'anon',
         '--web-http-listen', `127.0.0.1:${relayPort}`,
       ],
       {
@@ -246,8 +246,9 @@ test.describe('Audio Integrity Tests', () => {
   });
 
   test('validates no frames dropped and audio integrity', async ({ context }) => {
-    const relayParam = `http://127.0.0.1:${relayPort}/marmot`;
-    const nostrParam = `ws://127.0.0.1:${nostrPort}/`;
+    // Test against localhost first to isolate network vs relay issues
+    const relayParam = process.env.TEST_RELAY || `http://127.0.0.1:${relayPort}/anon`;
+    const nostrParam = process.env.TEST_NOSTR || `ws://127.0.0.1:${nostrPort}/`;
     const baseUrl = `http://127.0.0.1:${serverPort}`;
 
     // Clear storage and set defaults

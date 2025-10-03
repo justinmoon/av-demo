@@ -165,7 +165,7 @@ test.skip('debug audio frame skipping with real infrastructure', async ({ page, 
   await waitForPort(serverPort);
 
   const baseUrl = `http://127.0.0.1:${serverPort}`;
-  const relayUrl = `https://127.0.0.1:${relayPort}/marmot`;
+  const relayUrl = `https://127.0.0.1:${relayPort}/anon`;
   const nostrUrl = `ws://127.0.0.1:${nostrPort}/`;
 
   try {

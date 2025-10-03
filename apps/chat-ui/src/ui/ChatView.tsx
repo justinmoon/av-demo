@@ -375,13 +375,11 @@ export function ChatView(props: ChatViewProps) {
               // Track frame counter for debugging
               const currentCounter = peerFrameCounters.get(peerPubkey) || -1;
 
-              // Debug: log every 50th received frame
-              if (peerFrameCounter % 50 === 0) {
-                console.debug('[audio] Received frame', peerFrameCounter, 'from', peerPubkey.slice(0, 8));
-              }
+              // Debug: log ALL received frames to diagnose drops
+              console.log(`[audio] RECEIVED frame ${peerFrameCounter} from ${peerPubkey.slice(0, 8)}`);
 
               if (peerFrameCounter !== currentCounter + 1 && peerFrameCounter !== 0) {
-                console.warn('[audio] Frame skip for peer', peerPubkey, 'expected', currentCounter + 1, 'got', peerFrameCounter);
+                console.warn(`[audio] ⚠️  FRAME SKIP for peer ${peerPubkey.slice(0, 8)}: expected ${currentCounter + 1}, got ${peerFrameCounter} (gap of ${peerFrameCounter - currentCounter - 1})`);
               }
               peerFrameCounters.set(peerPubkey, peerFrameCounter);
             } catch (err) {
@@ -444,10 +442,8 @@ export function ChatView(props: ChatViewProps) {
               moq.publishAudio(payload);
               setEncryptedFramesSent((prev) => prev + 1);
 
-              // Debug: log every 50th frame to track what's being sent
-              if (frameCounter % 50 === 0) {
-                console.debug('[audio] Published frame', frameCounter);
-              }
+              // Debug: log ALL frames to diagnose drops (can be disabled after debugging)
+              console.log(`[audio] SENT frame ${frameCounter} (size: ${payload.length} bytes)`);
 
               frameCounter++;
             } catch (err) {

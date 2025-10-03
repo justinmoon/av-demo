@@ -197,7 +197,7 @@ test.describe('Audio UI Tests', () => {
       [
         '--listen', `127.0.0.1:${relayPort}`,
         '--tls-generate', 'localhost,127.0.0.1',
-        '--auth-public', 'marmot',
+        '--auth-public', 'anon',
         '--web-http-listen', `127.0.0.1:${relayPort}`,
       ],
       {

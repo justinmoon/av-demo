@@ -219,7 +219,7 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
       [
         '--listen', `127.0.0.1:${relayPort}`,
         '--tls-generate', 'localhost,127.0.0.1',
-        '--auth-public', 'marmot',
+        '--auth-public', 'anon',
         '--web-http-listen', `127.0.0.1:${relayPort}`,
       ],
       {
@@ -266,7 +266,7 @@ test.describe('Phase 1 Step 4 - MoQ browser chat', () => {
       }
     });
 
-    const relayParam = `http://127.0.0.1:${relayPort}/marmot`;
+    const relayParam = `http://127.0.0.1:${relayPort}/anon`;
     const nostrParam = process.env.MARMOT_NOSTR_URL || `ws://127.0.0.1:${nostrPort}/`;
     const baseUrl = `http://127.0.0.1:${serverPort}`;
 

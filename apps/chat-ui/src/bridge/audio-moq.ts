@@ -127,9 +127,20 @@ export async function createAudioMoq(
           const track = broadcast.subscribe(peerTrackLabel, 0);
 
           for (;;) {
+            const readStart = performance.now();
             const frame = await track.readFrame();
+            const readEnd = performance.now();
+
             if (!frame) break;
+
+            const callbackStart = performance.now();
             callbacks.onPeerAudio(peerPubkey, frame);
+            const callbackEnd = performance.now();
+
+            // Log timing to diagnose if callback is blocking frame reads
+            if (callbackEnd - callbackStart > 10) {
+              console.warn(`[audio-moq] SLOW callback: ${(callbackEnd - callbackStart).toFixed(1)}ms (read took ${(readEnd - readStart).toFixed(1)}ms)`);
+            }
           }
         } catch (err) {
           if (isTransient(err)) {
