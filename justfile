@@ -53,3 +53,11 @@ ci:
 	@echo "\n==> Running Playwright tests..."
 	npm run test
 	@echo "\n✅ All CI checks passed!"
+
+# Build and deploy to production
+deploy:
+	@echo "Building for production..."
+	npm run build
+	@echo "\nDeploying to justinmoon.com/s/av..."
+	deploy-static av apps/chat-ui/dist
+	@echo "\n✅ Deployed! Visit https://justinmoon.com/s/av"

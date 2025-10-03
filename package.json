@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build:wasm": "wasm-pack build crates/marmot-chat --target web --out-dir ../../tests/pkg",
-    "build:ui": "tsc --project apps/chat-ui/tsconfig.json && node apps/chat-ui/esbuild.config.mjs && cp tests/pkg/marmot_chat_bg.wasm apps/chat-ui/dist/",
+    "build:ui": "tsc --project apps/chat-ui/tsconfig.json && node apps/chat-ui/esbuild.config.mjs && cp tests/pkg/marmot_chat_bg.wasm apps/chat-ui/dist/ && cp apps/chat-ui/index.html apps/chat-ui/dist/ && cp apps/chat-ui/styles.css apps/chat-ui/dist/",
     "build": "npm run build:wasm && npm run build:ui",
     "pretest": "npm run build",
     "test": "playwright test",

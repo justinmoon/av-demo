@@ -39,9 +39,9 @@ export function Onboarding(props: OnboardingProps) {
   const [secretHex, setSecretHex] = createSignal<string>('');
   const [loginError, setLoginError] = createSignal<string>('');
   const [relayUrl, setRelayUrl] = createSignal(
-    props.defaults.relay ?? 'http://127.0.0.1:54943/marmot'
+    props.defaults.relay ?? 'https://moq.justinmoon.com/anon'
   );
-  const [nostrUrl, setNostrUrl] = createSignal(props.defaults.nostr ?? 'ws://127.0.0.1:8880/');
+  const [nostrUrl, setNostrUrl] = createSignal(props.defaults.nostr ?? 'wss://relay.damus.io/');
   const [peerPub, setPeerPub] = createSignal('');
   const [inviteLink, setInviteLink] = createSignal('');
   const [sessionId, setSessionId] = createSignal('');
