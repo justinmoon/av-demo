@@ -27,9 +27,9 @@ export async function createAudioPlayback(config: AudioPlaybackConfig): Promise<
     source.buffer = audioBuffer;
     source.connect(audioContext.destination);
 
-    // Schedule playback
+    // Schedule playback with 50ms latency buffer to smooth network jitter
     const now = audioContext.currentTime;
-    const startTime = Math.max(now, nextStartTime);
+    const startTime = Math.max(now + 0.05, nextStartTime);
     source.start(startTime);
 
     // Update next start time
