@@ -115,14 +115,16 @@ export async function createAudioMoq(
     }
 
     const consumePeerAudio = async () => {
+      // Derive peer's track label from their pubkey (must match what they publish)
+      const peerTrackLabel = `audio-${peerPubkey.slice(0, 8)}`;
       const peerAudioPath = Moq.Path.join(audioPath, Moq.Path.from(peerPubkey));
-      const subscribePath = Moq.Path.join(peerAudioPath, Moq.Path.from(config.trackLabel));
+      const subscribePath = Moq.Path.join(peerAudioPath, Moq.Path.from(peerTrackLabel));
       console.debug('[audio-moq] subscribing to peer audio:', peerPubkey, 'path:', subscribePath.toString());
 
       while (!closed) {
         try {
           const broadcast = connection.consume(subscribePath);
-          const track = broadcast.subscribe(config.trackLabel, 0);
+          const track = broadcast.subscribe(peerTrackLabel, 0);
 
           for (;;) {
             const frame = await track.readFrame();

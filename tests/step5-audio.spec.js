@@ -472,5 +472,43 @@ test.describe('Audio UI Tests', () => {
     // Both should show audio active
     await expect(initialToggle).toHaveText(/Stop Audio/);
     await expect(peerToggle).toHaveText(/Stop Audio/);
+
+    // CRITICAL: Verify actual encrypted audio transmission
+    // Wait for Initial to send encrypted frames (mock audio generates frames every 100ms)
+    await initialPage.waitForFunction(
+      () => window.audioStats && window.audioStats.encryptedFramesSent > 0,
+      { timeout: 3000 }
+    );
+    const initialSent = await initialPage.evaluate(() => window.audioStats.encryptedFramesSent);
+    console.log(`[Initial] Encrypted frames sent: ${initialSent}`);
+    await expect(initialSent).toBeGreaterThan(0);
+
+    // Wait for Peer to send encrypted frames
+    await peerPage.waitForFunction(
+      () => window.audioStats && window.audioStats.encryptedFramesSent > 0,
+      { timeout: 3000 }
+    );
+    const peerSent = await peerPage.evaluate(() => window.audioStats.encryptedFramesSent);
+    console.log(`[Peer] Encrypted frames sent: ${peerSent}`);
+    await expect(peerSent).toBeGreaterThan(0);
+
+    // CRITICAL: Verify encrypted frames are RECEIVED and DECRYPTED successfully
+    // Initial should receive peer's encrypted audio
+    await initialPage.waitForFunction(
+      () => window.audioStats && window.audioStats.encryptedFramesReceived > 0,
+      { timeout: 5000 }
+    );
+    const initialReceived = await initialPage.evaluate(() => window.audioStats.encryptedFramesReceived);
+    console.log(`[Initial] Encrypted frames received and decrypted: ${initialReceived}`);
+    await expect(initialReceived).toBeGreaterThan(0);
+
+    // Peer should receive initial's encrypted audio
+    await peerPage.waitForFunction(
+      () => window.audioStats && window.audioStats.encryptedFramesReceived > 0,
+      { timeout: 5000 }
+    );
+    const peerReceived = await peerPage.evaluate(() => window.audioStats.encryptedFramesReceived);
+    console.log(`[Peer] Encrypted frames received and decrypted: ${peerReceived}`);
+    await expect(peerReceived).toBeGreaterThan(0);
   });
 });

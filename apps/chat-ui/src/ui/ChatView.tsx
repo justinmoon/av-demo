@@ -32,6 +32,10 @@ export function ChatView(props: ChatViewProps) {
   const [audioEnabled, setAudioEnabled] = createSignal(false);
   const [audioStatus, setAudioStatus] = createSignal('');
 
+  // Debug counters for testing encrypted audio transmission
+  const [encryptedFramesSent, setEncryptedFramesSent] = createSignal(0);
+  const [encryptedFramesReceived, setEncryptedFramesReceived] = createSignal(0);
+
   let controller: ChatHandle | null = null;
   let runId = 0;
   let messageInput: HTMLTextAreaElement | undefined;
@@ -70,6 +74,10 @@ export function ChatView(props: ChatViewProps) {
     (window as any).chatReady = ready();
     (window as any).chatStatus = status();
     (window as any).chatError = currentError()?.message ?? '';
+    (window as any).audioStats = {
+      encryptedFramesSent: encryptedFramesSent(),
+      encryptedFramesReceived: encryptedFramesReceived(),
+    };
   };
 
   createEffect(syncWindowState);
@@ -356,6 +364,9 @@ export function ChatView(props: ChatViewProps) {
               const float32 = int16ToFloat32(int16);
               playback.play(float32);
 
+              // Track successful decryption
+              setEncryptedFramesReceived((prev) => prev + 1);
+
               // Track frame counter for debugging
               const currentCounter = peerFrameCounters.get(peerPubkey) || -1;
               if (peerFrameCounter !== currentCounter + 1 && peerFrameCounter !== 0) {
@@ -415,6 +426,7 @@ export function ChatView(props: ChatViewProps) {
 
               // Publish encrypted frame with metadata
               moq.publishAudio(payload);
+              setEncryptedFramesSent((prev) => prev + 1);
 
               frameCounter++;
             } catch (err) {
